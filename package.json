@@ -1,0 +1,30 @@
+{
+  "name": "ai-gesture-runner-3d",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AI-powered, 3D endless-runner game with real-time MediaPipe hand-gesture recognition",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "threejs",
+    "mediapipe",
+    "webgl",
+    "endless-runner",
+    "gesture-recognition",
+    "computer-vision",
+    "touch-free"
+  ],
+  "author": "AI Gesture Runner 3D Team",
+  "license": "MIT",
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.1.0",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "vite": "^8.3.4"
+  }
+}

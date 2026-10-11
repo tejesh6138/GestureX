@@ -1,0 +1,306 @@
+/**
+ * AI Gesture Runner 3D - Responsive Layouts
+ * Mobile portrait, landscape, and touch-free interaction rules.
+ */
+
+/* Prevent accidental scrolling, pinch-zoom, and gestures during gameplay */
+body, #app-container, #game-canvas {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  overscroll-behavior: none;
+}
+
+@media (max-width: 960px) {
+  .menu-overlay {
+    justify-content: center !important;
+    padding-left: 0 !important;
+  }
+}
+
+/* Tablet & Mobile Screens */
+@media (max-width: 768px) {
+  .logo-title {
+    font-size: 2.1rem;
+  }
+
+  .menu-content, .setup-content, .tutorial-content, .settings-content, .results-content {
+    padding: 24px 18px;
+    max-height: 94vh;
+    overflow-y: auto;
+  }
+
+  .setup-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .hud-top {
+    top: 10px;
+    left: 10px;
+    gap: 8px;
+  }
+
+  .stat-card {
+    padding: 6px 10px;
+  }
+
+  .stat-value, .stat-value-coin {
+    font-size: 1.1rem;
+  }
+
+  .hud-pip-wrapper {
+    top: 10px;
+    right: 10px;
+    width: 120px;
+    height: 90px;
+  }
+
+  .pip-canvas {
+    width: 120px;
+    height: 90px;
+  }
+
+  .hud-powerups {
+    top: 75px;
+    left: 10px;
+  }
+
+  .hud-gesture-feedback {
+    bottom: 12px;
+    left: 10px;
+    gap: 6px;
+  }
+
+  .feedback-icon {
+    padding: 6px 8px;
+    font-size: 0.75rem;
+  }
+
+  .countdown-overlay {
+    font-size: 5rem;
+  }
+
+  .btn {
+    padding: 12px 18px;
+    font-size: 0.95rem;
+  }
+
+  .gesture-grid, .tutorial-six-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .leaderboard-table th, .leaderboard-table td {
+    padding: 8px 10px;
+    font-size: 0.75rem;
+  }
+}
+
+/* Small Smartphone Screens */
+@media (max-width: 480px) {
+  .logo-title {
+    font-size: 1.7rem;
+  }
+
+  .btn-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hud-top {
+    flex-wrap: wrap;
+    max-width: 200px;
+  }
+
+  .speed-card {
+    display: none; /* Hide speed on ultra-compact phones to leave room */
+  }
+
+  .gesture-grid, .tutorial-six-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .results-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .game-over-content {
+    padding: 16px 14px;
+  }
+
+  .game-over-actions {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .leaderboard-table th, .leaderboard-table td {
+    padding: 6px 6px;
+    font-size: 0.7rem;
+  }
+}
+
+/* Standard and Short Laptop Screens (viewport height <= 760px) */
+@media (max-height: 760px) {
+  .menu-content {
+    padding: 20px 28px !important;
+    max-height: calc(100dvh - 24px) !important;
+  }
+
+  .logo-title {
+    font-size: 2.1rem !important;
+    margin-bottom: 4px !important;
+  }
+
+  .logo-wrapper {
+    margin-bottom: 10px !important;
+  }
+
+  .logo-sub {
+    font-size: 0.72rem !important;
+  }
+
+  .logo-tagline {
+    font-size: 0.85rem !important;
+  }
+
+  .pb-badge {
+    padding: 8px 14px !important;
+    margin-bottom: 12px !important;
+  }
+
+  .difficulty-section {
+    margin-bottom: 12px !important;
+  }
+
+  .diff-card {
+    padding: 8px 6px !important;
+  }
+
+  .diff-card .diff-icon {
+    font-size: 1.25rem !important;
+    margin-bottom: 2px !important;
+  }
+
+  .diff-card .diff-title {
+    font-size: 0.85rem !important;
+  }
+
+  .diff-card .diff-desc {
+    display: none !important;
+  }
+
+  .menu-buttons {
+    gap: 8px !important;
+    margin-bottom: 12px !important;
+  }
+
+  .btn {
+    padding: 10px 18px !important;
+    font-size: 0.92rem !important;
+    min-height: 42px !important;
+  }
+
+  .menu-footer {
+    padding-top: 10px !important;
+  }
+
+  .setup-content, .tutorial-content, .settings-content, .results-content {
+    padding: 18px 22px !important;
+    max-height: calc(100dvh - 24px) !important;
+  }
+
+  .camera-preview-container {
+    max-height: 210px !important;
+  }
+
+  .setup-grid {
+    gap: 14px !important;
+    margin-bottom: 14px !important;
+  }
+
+  .tutorial-six-grid {
+    gap: 8px !important;
+  }
+
+  .gesture-card {
+    padding: 8px 10px !important;
+  }
+
+  .gesture-card .gesture-icon {
+    font-size: 1.3rem !important;
+    margin-bottom: 2px !important;
+  }
+
+  .gesture-card .gesture-title {
+    font-size: 0.85rem !important;
+  }
+
+  .gesture-card .gesture-desc {
+    font-size: 0.72rem !important;
+    line-height: 1.25 !important;
+  }
+}
+
+/* Landscape Mode on Phones and Small Tablets */
+@media (max-height: 520px) and (orientation: landscape) {
+  .menu-overlay {
+    align-items: flex-start !important;
+    padding-top: 10px !important;
+    overflow-y: auto !important;
+  }
+
+  .menu-content, .setup-content, .tutorial-content, .settings-content, .results-content {
+    padding: 14px 18px !important;
+    max-height: 98dvh !important;
+    overflow-y: auto !important;
+  }
+
+  .logo-title {
+    font-size: 1.7rem !important;
+    margin-bottom: 2px !important;
+  }
+
+  .logo-tagline {
+    display: none !important;
+  }
+
+  .difficulty-cards-grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+  }
+
+  .menu-buttons {
+    margin-bottom: 10px !important;
+  }
+
+  .hud-pip-wrapper {
+    width: 95px !important;
+    height: 72px !important;
+    top: 6px !important;
+    right: 6px !important;
+  }
+
+  .pip-canvas {
+    width: 95px !important;
+    height: 72px !important;
+  }
+
+  .hud-top {
+    top: 6px !important;
+    left: 6px !important;
+    gap: 6px !important;
+  }
+
+  .hud-gesture-feedback {
+    display: none !important;
+  }
+}
+
+@media (max-width: 580px) {
+  .difficulty-cards-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
