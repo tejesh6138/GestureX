@@ -23,6 +23,7 @@ import { Camera } from '../gesture/CameraService.js';
 import { MediaPipe } from '../gesture/MediaPipeService.js';
 import { Sound } from '../services/SoundService.js';
 import { Settings } from '../services/SettingsService.js';
+import { Quality } from '../services/QualityManager.js';
 
 import { HUD } from '../ui/HUD.js';
 import { MenuScreen } from '../ui/MenuScreen.js';
@@ -64,6 +65,14 @@ export class Game {
     // 2. State Machine & Loop
     this.stateMachine = new GameStateMachine(GAME_STATES.LOADING);
     this.loop = new GameLoop();
+    this.loop.setRenderer(this.world.renderer);
+
+    // Bind Adaptive Quality Controller to World, PerformanceMonitor, and GameLoop
+    Quality.bind({
+      world: this.world,
+      perfMonitor: this.loop.perfMonitor,
+      gameLoop: this.loop
+    });
 
     // 3. UI Layer
     this.uiContainer = document.createElement('div');
@@ -72,6 +81,7 @@ export class Game {
 
     this.hud = new HUD(this.uiContainer);
     Gestures.setPipCanvas(this.hud.getPipCanvas());
+    Gestures.setPerfMonitor(this.loop.perfMonitor);
 
     this.menuScreen = new MenuScreen(this.uiContainer, (action) => this.handleMenuAction(action));
     this.cameraSetupScreen = new CameraSetupScreen(this.uiContainer, (action) => this.handleCameraSetupAction(action));
@@ -80,7 +90,7 @@ export class Game {
     this.gameOverScreen = new GameOverScreen(this.uiContainer, (action) => this.handleGameOverAction(action));
     this.settingsScreen = new SettingsScreen(this.uiContainer, (action) => this.handleSettingsAction(action));
     this.resultsScreen = new ResultsScreen(this.uiContainer, (action) => this.handleResultsAction(action));
-    this.diagnosticPanel = new DiagnosticPanel(this.uiContainer);
+    this.diagnosticPanel = new DiagnosticPanel(this.uiContainer, this.loop.perfMonitor);
 
     // Countdown Overlay
     this.countdownEl = document.createElement('div');
@@ -104,11 +114,8 @@ export class Game {
   }
 
   bindEvents() {
-    // Tracking lost in active run -> auto soft pause
+    // Tracking lost indicator in HUD (sustained loss triggers PAUSE_REQUESTED)
     GlobalEvents.on(EVENTS.TRACKING_LOST, () => {
-      if (this.stateMachine.getState() === GAME_STATES.RUNNING) {
-        this.pauseGame('Hand tracking lost. Re-center hand in view to resume.');
-      }
       this.hud.setTrackingLost(true);
     });
 
@@ -136,9 +143,10 @@ export class Game {
     });
 
     // Explicit Gesture Pause & Resume Requests
-    GlobalEvents.on(EVENTS.PAUSE_REQUESTED, () => {
+    GlobalEvents.on(EVENTS.PAUSE_REQUESTED, (data) => {
       if (this.stateMachine.getState() === GAME_STATES.RUNNING) {
-        this.pauseGame('Game paused via open-palm gesture (✋).');
+        const reason = (data && data.reason) || 'Game paused via open-palm gesture (✋).';
+        this.pauseGame(reason);
       }
     });
 
@@ -181,6 +189,13 @@ export class Game {
         pipWrapper.style.display = showPip ? 'block' : 'none';
       }
     });
+
+    // Landing Dust Impact
+    GlobalEvents.on('PLAYER_LANDED', ({ position }) => {
+      if (this.world && this.world.emitDustPuff) {
+        this.world.emitDustPuff(position.x, 0.02, position.z, 8, 0.45, 1.8);
+      }
+    });
   }
 
   setupGameLoop() {
@@ -189,8 +204,15 @@ export class Game {
       onRender: () => this.render(),
       onInference: (timestamp) => {
         if (Camera.isReady && MediaPipe.isLoaded) {
-          Gestures.processFrame(timestamp);
+          return Gestures.processFrame(timestamp);
         }
+        return { isFresh: false };
+      }
+    });
+
+    GlobalEvents.on(EVENTS.CAMERA_READY, ({ video }) => {
+      if (this.loop && typeof this.loop.startInferenceScheduler === 'function') {
+        this.loop.startInferenceScheduler(video);
       }
     });
   }
@@ -305,6 +327,7 @@ export class Game {
     } else {
       this.stateMachine.transition(GAME_STATES.MENU);
       this.menuScreen.show();
+      this.resetGameplay();
     }
   }
 
@@ -344,12 +367,20 @@ export class Game {
     if (this.stateMachine.getState() !== GAME_STATES.RUNNING) return;
     this.stateMachine.transition(GAME_STATES.PAUSED);
     Sound.stopBgm();
+    this.player.animator.pause();
     this.pauseScreen.show(reason);
   }
 
   resumeWithCountdown() {
     if (this.stateMachine.getState() !== GAME_STATES.PAUSED) return;
     this.pauseScreen.hide();
+
+    // Safely restore grounded state if paused during a jump so character is not left airborne
+    if (this.playerController.position.y > 0 || this.playerController.state === 'JUMPING') {
+      this.playerController.ensureGrounded();
+      this.player.animator.setState(ANIM_STATES.RUNNING);
+    }
+
     this.stateMachine.transition(GAME_STATES.COUNTDOWN);
 
     let count = 3;
@@ -368,6 +399,7 @@ export class Game {
       } else {
         clearInterval(interval);
         this.countdownEl.classList.add('hidden');
+        this.player.animator.resume();
         this.stateMachine.transition(GAME_STATES.RUNNING);
         Sound.startBgm();
       }
@@ -384,9 +416,13 @@ export class Game {
 
   resetGameplay() {
     this.playerController.reset();
+    this.player.animator.reset();
+    this.player.invulnerableTimer = 0;
+    this.player.mesh.visible = true;
     this.player.mesh.position.set(0, 0, 0);
     this.player.bodyContainer.rotation.y = 0;
     this.track.reset();
+    this.world.reset();
     this.obstacleManager.reset();
     this.coinManager.reset();
     this.powerUpManager.reset();
@@ -399,6 +435,9 @@ export class Game {
   }
 
   update(dt, totalTime) {
+    // Dynamic Adaptive Graphics Quality Controller
+    Quality.update();
+
     const state = this.stateMachine.getState();
 
     // In MENU: Stand on the right side on desktop/laptop, or position cleanly on mobile
@@ -422,12 +461,12 @@ export class Game {
       return;
     }
 
-    // In COUNTDOWN: Smoothly move character into lane center facing away (-Z)
+    // In COUNTDOWN: Position character cleanly in current lane at track level facing away (-Z)
     if (state === GAME_STATES.COUNTDOWN) {
       this.world.setMenuPedestalVisible(false);
-      this.player.mesh.position.set(0, 0, 0);
+      this.player.mesh.position.set(this.playerController.position.x, 0, this.playerController.position.z);
       this.player.bodyContainer.rotation.y = 0; // Back facing camera
-      this.player.animate(ANIM_STATES.RUNNING, dt, 18);
+      this.player.animate(ANIM_STATES.RUNNING, dt, 18, { x: this.playerController.position.x, y: 0, z: this.playerController.position.z });
       this.cameraController.update(this.playerController.position, 18, dt);
       return;
     }
@@ -444,7 +483,7 @@ export class Game {
     this.track.update(this.playerController.position.z);
 
     // 4. Update Obstacles with speed and distance
-    this.obstacleManager.update(this.playerController.position.z, dt, this.playerController.distance);
+    this.obstacleManager.update(this.playerController.position.z, dt, this.playerController.distance, this.playerController.speed);
 
     // 5. Update Coins (with Magnet pull check)
     this.coinManager.update(
@@ -470,8 +509,13 @@ export class Game {
       dt
     );
 
-    // 10. Update 3D World (lights & distant skyline position)
-    this.world.update(this.playerController.position.z);
+    // 10. Update 3D World (lights, distant skyline, slipstream streaks, dust particles)
+    this.world.update(this.playerController.position, this.playerController.speed, dt);
+
+    // Subtle track friction dust while sliding
+    if (this.playerController.state === 'SLIDING' && Math.random() < 0.45) {
+      this.world.emitDustPuff(this.playerController.position.x, 0.04, this.playerController.position.z, 2, 0.18, 0.6);
+    }
   }
 
   render() {

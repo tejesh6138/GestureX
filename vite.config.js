@@ -18,25 +18,23 @@ function mediapipeSourceMapPlugin() {
       return null;
     },
     load(id) {
-      const normalized = id.replace(/\\/g, '/');
-      if (normalized.includes('@mediapipe/tasks-vision') && normalized.endsWith('vision_bundle.mjs')) {
-        const filePath = path.resolve(id);
+      const cleanId = id.split('?')[0].replace(/\\/g, '/');
+      if (cleanId.includes('@mediapipe/tasks-vision') && cleanId.endsWith('vision_bundle.mjs')) {
+        const filePath = path.resolve(cleanId);
         if (fs.existsSync(filePath)) {
           let code = fs.readFileSync(filePath, 'utf-8');
-          code = code.replace(
-            '//# sourceMappingURL=vision_bundle_mjs.js.map',
-            '//# sourceMappingURL=vision_bundle.mjs.map'
-          );
+          // Strip the invalid source map comment so Vite does not trigger ENOENT on vision_bundle_mjs.js.map
+          code = code.replace(/\/\/# sourceMappingURL=vision_bundle_mjs\.js\.map/, '');
           return { code, map: null };
         }
       }
       return null;
     },
     transform(code, id) {
-      const normalized = id.replace(/\\/g, '/');
-      if (normalized.includes('@mediapipe/tasks-vision') && normalized.endsWith('vision_bundle.mjs')) {
+      const cleanId = id.split('?')[0].replace(/\\/g, '/');
+      if (cleanId.includes('@mediapipe/tasks-vision') && cleanId.endsWith('vision_bundle.mjs')) {
         return {
-          code: code.replace('vision_bundle_mjs.js.map', 'vision_bundle.mjs.map'),
+          code: code.replace(/\/\/# sourceMappingURL=vision_bundle_mjs\.js\.map/, ''),
           map: null
         };
       }
@@ -55,14 +53,11 @@ function mediapipeSourceMapPlugin() {
 
 export default defineConfig({
   base: './',
+  assetsInclude: ['**/*.task', '**/*.wasm'],
   plugins: [mediapipeSourceMapPlugin()],
   server: {
     port: 3000,
-    host: true,
-    headers: {
-      'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'credentialless'
-    }
+    host: true
   },
   preview: {
     port: 4173,

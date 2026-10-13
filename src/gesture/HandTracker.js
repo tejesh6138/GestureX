@@ -1,7 +1,8 @@
 /**
  * AI Gesture Runner 3D - HandTracker
+ * Robust computer-vision kinematics tracker:
  * Extracts normalized hand kinematics, individual finger extension/folding,
- * palm center, and motion velocities using relative geometry.
+ * palm center, slant angles, and velocities using relative geometry invariant to hand scale.
  */
 
 import { MathUtils } from '../utils/MathUtils.js';
@@ -68,8 +69,8 @@ export class HandTracker {
 
     // Thumb metrics
     const thumbDistToPalm = MathUtils.distance2D(thumbTip.x, thumbTip.y, palmCenter.x, palmCenter.y) / handScale;
-    const thumbExtended = thumbDistToPalm > 1.05;
-    const thumbFolded = thumbDistToPalm < 0.88;
+    const thumbExtended = thumbDistToPalm > 1.0;
+    const thumbFolded = thumbDistToPalm < 0.90;
 
     const avgTipDistanceToPalm = (
       indexMetrics.distPalmTip +
@@ -88,23 +89,26 @@ export class HandTracker {
                        middleMetrics.isExtended &&
                        ringMetrics.isExtended &&
                        pinkyMetrics.isExtended &&
-                       avgTipDistanceToPalm > 0.85;
+                       (avgTipDistanceToPalm > 0.88 || thumbExtended);
 
-    // 2. CLOSED FIST (Slide): All 4 fingers folded tight
+    // 2. CLOSED FIST (Slide): All 4 fingers folded tight toward palm
     const isFist = (extendedCount === 0) &&
-                   indexMetrics.isFolded &&
-                   middleMetrics.isFolded &&
-                   ringMetrics.isFolded &&
-                   pinkyMetrics.isFolded &&
-                   (avgTipDistanceToPalm < 0.82 || thumbFolded);
+                   (indexMetrics.distPalmTip < 0.88 || indexMetrics.isFolded) &&
+                   (middleMetrics.distPalmTip < 0.88 || middleMetrics.isFolded) &&
+                   (ringMetrics.distPalmTip < 0.88 || ringMetrics.isFolded) &&
+                   (pinkyMetrics.distPalmTip < 0.88 || pinkyMetrics.isFolded) &&
+                   (avgTipDistanceToPalm < 0.84 || thumbFolded);
 
-    // 3. INDEX ONLY (Directional Left / Right): ONLY index finger extended, middle/ring/pinky folded
+    // 3. INDEX ONLY (Directional Left / Right):
+    // Index finger extended, while middle, ring, pinky are folded/curled
     const isIndexOnly = indexMetrics.isExtended &&
-                        middleMetrics.isFolded &&
-                        ringMetrics.isFolded &&
-                        pinkyMetrics.isFolded &&
-                        (indexMetrics.distWristTip > middleMetrics.distWristTip * 1.15) &&
-                        (indexTip.y < indexMcp.y + 0.1);
+                        !middleMetrics.isExtended &&
+                        !ringMetrics.isExtended &&
+                        !pinkyMetrics.isExtended &&
+                        (middleMetrics.distWristTip < indexMetrics.distWristTip * 0.85) &&
+                        (ringMetrics.distWristTip < indexMetrics.distWristTip * 0.82) &&
+                        (pinkyMetrics.distWristTip < indexMetrics.distWristTip * 0.82) &&
+                        (indexTip.y < indexMcp.y + 0.12);
 
     // Palm orientation vector (wrist to middle knuckle)
     const palmVecX = middleMcp.x - wrist.x;
@@ -122,28 +126,28 @@ export class HandTracker {
     const relativeSlant = (indexVecX * rightVecX + indexVecY * rightVecY) / handScale;
     const absoluteSlant = (indexTip.x - indexMcp.x) / handScale;
     // Balanced composite slant (invariant to hand rotation / tilt)
-    const indexSlant = relativeSlant * 0.65 + absoluteSlant * 0.35;
-    const indexSlantThreshold = 0.20;
+    const indexSlant = relativeSlant * 0.60 + absoluteSlant * 0.40;
+    const indexSlantThreshold = 0.18;
     const isIndexSlantedLeft = isIndexOnly && (indexSlant < -indexSlantThreshold);
     const isIndexSlantedRight = isIndexOnly && (indexSlant > indexSlantThreshold);
 
     // 4. JUMP: INDEX + MIDDLE FINGERS EXTENDED upward (Peace/V sign), ring/pinky folded
     const isTwoFingers = indexMetrics.isExtended &&
                          middleMetrics.isExtended &&
-                         ringMetrics.isFolded &&
-                         pinkyMetrics.isFolded &&
-                         (indexMetrics.distWristTip > ringMetrics.distWristTip * 1.15) &&
-                         (middleMetrics.distWristTip > ringMetrics.distWristTip * 1.15) &&
+                         !ringMetrics.isExtended &&
+                         !pinkyMetrics.isExtended &&
+                         (ringMetrics.distWristTip < middleMetrics.distWristTip * 0.85) &&
+                         (pinkyMetrics.distWristTip < middleMetrics.distWristTip * 0.82) &&
                          (indexTip.y < indexMcp.y) &&
                          (middleTip.y < middleMcp.y);
 
-    // 5. RESUME: INDEX + MIDDLE + RING FINGERS EXTENDED (3 fingers), pinky folded
+    // 5. RESUME: INDEX + MIDDLE + RING FINGERS EXTENDED (3 fingers), thumb and pinky folded
     const isThreeFingers = indexMetrics.isExtended &&
                           middleMetrics.isExtended &&
                           ringMetrics.isExtended &&
-                          pinkyMetrics.isFolded &&
-                          (middleMetrics.distWristTip > pinkyMetrics.distWristTip * 1.18) &&
-                          (ringMetrics.distWristTip > pinkyMetrics.distWristTip * 1.18) &&
+                          !pinkyMetrics.isExtended &&
+                          !thumbExtended &&
+                          (pinkyMetrics.distWristTip < ringMetrics.distWristTip * 0.85) &&
                           (indexTip.y < indexMcp.y) &&
                           (middleTip.y < middleMcp.y);
 
@@ -205,13 +209,13 @@ export class HandTracker {
     );
     const straightness = directLength / Math.max(0.001, segmentLength);
 
-    const isExtended = (distWristTip > distWristPip * 1.10) &&
-                       (distWristTip > distWristMcp * 1.20) &&
-                       (distPalmTip > 0.90) &&
-                       (straightness > 0.72);
+    const isExtended = (distWristTip > distWristPip * 1.08) &&
+                       (distWristTip > distWristMcp * 1.18) &&
+                       (distPalmTip > 0.88) &&
+                       (straightness > 0.70);
 
-    const isFolded = (distPalmTip < 0.82) ||
-                     (distWristTip <= distWristPip * 1.10) ||
+    const isFolded = (distPalmTip < 0.85) ||
+                     (distWristTip <= distWristPip * 1.08) ||
                      (straightness < 0.65);
 
     return {

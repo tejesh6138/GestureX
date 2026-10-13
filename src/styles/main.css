@@ -130,6 +130,10 @@ html, body {
   pointer-events: none !important;
 }
 
+.hidden {
+  display: none !important;
+}
+
 /* Buttons */
 .btn {
   display: inline-flex;

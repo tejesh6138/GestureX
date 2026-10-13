@@ -24,6 +24,14 @@ export class HUD {
     this.powerUpBar = null;
     this.floatingContainer = null;
     this.prevCoins = 0;
+    this.renderedScoreStr = '';
+    this.renderedDistanceStr = '';
+    this.renderedSpeedStr = '';
+    this.renderedDiffStr = '';
+    this.currentGestureBadge = '';
+    this.renderedPowerUpsKey = '';
+    this.feedbackEls = {};
+    this.currentActiveFeedbackId = null;
 
     this.build();
     this.bindEvents();
@@ -73,12 +81,8 @@ export class HUD {
       <!-- Top-Right Points-Only Holographic Skeleton Display -->
       <div class="hud-pip-wrapper">
         <canvas id="pip-canvas" width="160" height="120" class="pip-canvas"></canvas>
-        <div id="hud-gesture-badge" class="gesture-badge">NEUTRAL</div>
-      </div>
-
-      <!-- Tracking Lost Warning Alert -->
-      <div id="tracking-loss-banner" class="tracking-loss-banner hidden">
-        ⚠️ HAND OUT OF VIEW — REPOSITION HAND TO RESUME
+        <div id="hud-gesture-badge" class="gesture-badge">HAND READY</div>
+        <div id="hud-tracking-alert" class="hud-tracking-alert hidden">⚠️ OUT OF RANGE</div>
       </div>
 
       <!-- Live Gesture Feed Indicator in Bottom Left -->
@@ -88,7 +92,7 @@ export class HUD {
         <div class="feedback-icon" id="fb-slide">✊ SLIDE (FIST)</div>
         <div class="feedback-icon" id="fb-right">👉 RIGHT (INDEX)</div>
         <div class="feedback-icon" id="fb-pause">✋ PAUSE (PALM)</div>
-        <div class="feedback-icon" id="fb-resume">🤟 RESUME (3-FINGER)</div>
+        <div class="feedback-icon" id="fb-resume"><img src="./icons/gesture-resume.png" class="resume-icon-inline" alt="Resume"> RESUME (3-FINGER)</div>
       </div>
     `;
 
@@ -103,8 +107,18 @@ export class HUD {
     this.diffVal = this.element.querySelector('#hud-difficulty');
     this.pipCanvas = this.element.querySelector('#pip-canvas');
     this.activeGestureTag = this.element.querySelector('#hud-gesture-badge');
-    this.trackingLossBanner = this.element.querySelector('#tracking-loss-banner');
+    this.trackingAlert = this.element.querySelector('#hud-tracking-alert');
     this.powerUpBar = this.element.querySelector('#hud-powerups');
+
+    // Cache gesture feedback elements
+    this.feedbackEls = {
+      'fb-left': this.element.querySelector('#fb-left'),
+      'fb-right': this.element.querySelector('#fb-right'),
+      'fb-jump': this.element.querySelector('#fb-jump'),
+      'fb-slide': this.element.querySelector('#fb-slide'),
+      'fb-pause': this.element.querySelector('#fb-pause'),
+      'fb-resume': this.element.querySelector('#fb-resume')
+    };
   }
 
   bindEvents() {
@@ -114,6 +128,10 @@ export class HUD {
 
     GlobalEvents.on('DIFFICULTY_CHANGED', ({ mode }) => {
       this.updateDifficulty(mode);
+    });
+
+    GlobalEvents.on('GESTURE_OUT_OF_RANGE', ({ isOut }) => {
+      this.setOutOfRange(isOut);
     });
   }
 
@@ -126,19 +144,25 @@ export class HUD {
   }
 
   updateScore(score) {
-    if (this.scoreVal) {
-      this.scoreVal.textContent = MathUtils.formatNumber(score);
+    if (!this.scoreVal) return;
+    const str = MathUtils.formatNumber(score);
+    if (this.renderedScoreStr !== str) {
+      this.renderedScoreStr = str;
+      this.scoreVal.textContent = str;
     }
   }
 
   updateDistance(meters) {
-    if (this.distanceVal) {
-      this.distanceVal.textContent = MathUtils.formatDistance(meters);
+    if (!this.distanceVal) return;
+    const str = MathUtils.formatDistance(meters);
+    if (this.renderedDistanceStr !== str) {
+      this.renderedDistanceStr = str;
+      this.distanceVal.textContent = str;
     }
   }
 
   updateCoins(coins) {
-    if (!this.coinsVal) return;
+    if (!this.coinsVal || this.prevCoins === coins) return;
 
     if (coins > this.prevCoins) {
       this.coinsVal.classList.remove('coin-pop');
@@ -166,34 +190,40 @@ export class HUD {
   }
 
   updateSpeed(speed) {
-    if (this.speedVal) {
-      this.speedVal.textContent = `${speed.toFixed(1)} m/s`;
+    if (!this.speedVal) return;
+    const rounded = speed.toFixed(1);
+    if (this.renderedSpeedStr !== rounded) {
+      this.renderedSpeedStr = rounded;
+      this.speedVal.textContent = `${rounded} m/s`;
     }
   }
 
   updateDifficulty(mode) {
-    if (this.diffVal) {
+    if (!this.diffVal) return;
+    if (this.renderedDiffStr !== mode) {
+      this.renderedDiffStr = mode;
       const iconMap = { EASY: '🌱', MEDIUM: '⚡', FAST: '🔥' };
       this.diffVal.textContent = `${iconMap[mode] || '⚡'} ${mode}`;
     }
   }
 
   setGestureBadge(gesture) {
-    if (this.activeGestureTag) {
+    if (this.activeGestureTag && this.currentGestureBadge !== gesture) {
+      this.currentGestureBadge = gesture;
       let label = gesture;
       if (gesture === 'PAUSE' || gesture === 'HOLDING_PAUSE') label = '✋ PAUSE';
-      else if (gesture === 'RESUME' || gesture === 'HOLDING_RESUME') label = '🤟 RESUME';
+      else if (gesture === 'RESUME' || gesture === 'HOLDING_RESUME') label = '<img src="./icons/gesture-resume.png" class="resume-icon-inline" alt="Resume"> RESUME';
       else if (gesture === 'SLIDE') label = '✊ SLIDE';
       else if (gesture === 'JUMP') label = '✌️ JUMP';
       else if (gesture === 'MOVE_LEFT') label = '👈 LEFT';
       else if (gesture === 'MOVE_RIGHT') label = '👉 RIGHT';
       else if (gesture === 'NEUTRAL') label = 'HAND DETECTED';
 
-      this.activeGestureTag.textContent = label;
+      this.activeGestureTag.innerHTML = label;
       this.activeGestureTag.className = `gesture-badge badge-${gesture.toLowerCase()}`;
     }
 
-    // Flash corresponding gesture feedback icon
+    // Flash corresponding gesture feedback icon with cached DOM references
     const iconMap = {
       'MOVE_LEFT': 'fb-left',
       'MOVE_RIGHT': 'fb-right',
@@ -205,46 +235,75 @@ export class HUD {
       'HOLDING_RESUME': 'fb-resume'
     };
 
-    ['fb-left', 'fb-right', 'fb-jump', 'fb-slide', 'fb-pause', 'fb-resume'].forEach((id) => {
-      const el = this.element.querySelector(`#${id}`);
-      if (el) el.classList.remove('active');
-    });
+    const targetId = iconMap[gesture] || null;
+    if (targetId !== this.currentActiveFeedbackId) {
+      if (this.currentActiveFeedbackId && this.feedbackEls[this.currentActiveFeedbackId]) {
+        this.feedbackEls[this.currentActiveFeedbackId].classList.remove('active');
+      }
+      if (targetId && this.feedbackEls[targetId]) {
+        this.feedbackEls[targetId].classList.add('active');
+      }
+      this.currentActiveFeedbackId = targetId;
+    }
+  }
 
-    const activeId = iconMap[gesture];
-    if (activeId) {
-      const activeEl = this.element.querySelector(`#${activeId}`);
-      if (activeEl) activeEl.classList.add('active');
+  setOutOfRange(isOut) {
+    if (this.trackingAlert) {
+      if (isOut) {
+        this.trackingAlert.textContent = '⚠️ OUT OF RANGE';
+        this.trackingAlert.classList.remove('hidden');
+        if (this.activeGestureTag) {
+          this.activeGestureTag.textContent = 'OUT OF RANGE';
+          this.activeGestureTag.className = 'gesture-badge badge-lost';
+        }
+      } else {
+        this.trackingAlert.classList.add('hidden');
+      }
     }
   }
 
   setTrackingLost(isLost) {
-    if (this.trackingLossBanner) {
+    if (this.trackingAlert) {
       if (isLost) {
-        this.trackingLossBanner.classList.remove('hidden');
+        this.trackingAlert.textContent = '⚠️ REPOSITION HAND';
+        this.trackingAlert.classList.remove('hidden');
         if (this.activeGestureTag) {
           this.activeGestureTag.textContent = 'TRACKING LOST';
           this.activeGestureTag.className = 'gesture-badge badge-lost';
         }
       } else {
-        this.trackingLossBanner.classList.add('hidden');
+        this.trackingAlert.classList.add('hidden');
       }
     }
   }
 
   updatePowerUps(powerUps) {
     if (!this.powerUpBar) return;
-    this.powerUpBar.innerHTML = '';
 
+    const magTime = powerUps.MAGNET > 0 ? powerUps.MAGNET.toFixed(1) : '0';
+    const hasShield = powerUps.SHIELD ? '1' : '0';
+    const boostTime = powerUps.BOOST > 0 ? powerUps.BOOST.toFixed(1) : '0';
+    const key = `${magTime}_${hasShield}_${boostTime}`;
+
+    if (this.renderedPowerUpsKey === key) return;
+    this.renderedPowerUpsKey = key;
+
+    if (magTime === '0' && hasShield === '0' && boostTime === '0') {
+      this.powerUpBar.innerHTML = '';
+      return;
+    }
+
+    let html = '';
     if (powerUps.MAGNET > 0) {
-      this.powerUpBar.innerHTML += `
+      html += `
         <div class="powerup-chip chip-magnet">
           <span>🧲 MAGNET</span>
-          <span class="timer">${powerUps.MAGNET.toFixed(1)}s</span>
+          <span class="timer">${magTime}s</span>
         </div>
       `;
     }
     if (powerUps.SHIELD) {
-      this.powerUpBar.innerHTML += `
+      html += `
         <div class="powerup-chip chip-shield">
           <span>🛡️ SHIELD</span>
           <span class="timer">ACTIVE</span>
@@ -252,13 +311,15 @@ export class HUD {
       `;
     }
     if (powerUps.BOOST > 0) {
-      this.powerUpBar.innerHTML += `
+      html += `
         <div class="powerup-chip chip-boost">
           <span>⚡ BOOST</span>
-          <span class="timer">${powerUps.BOOST.toFixed(1)}s</span>
+          <span class="timer">${boostTime}s</span>
         </div>
       `;
     }
+
+    this.powerUpBar.innerHTML = html;
   }
 
   getPipCanvas() {

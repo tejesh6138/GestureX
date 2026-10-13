@@ -30,7 +30,7 @@ export class PauseScreen {
         <p id="pause-reason" class="pause-reason">Game paused by player.</p>
 
         <div class="gesture-hint-box resume-hint">
-          <div class="hint-icon">🤟</div>
+          <div class="hint-icon"><img src="./icons/gesture-resume.png" class="resume-icon-img" alt="Resume"></div>
           <div class="hint-text">
             <strong>Touch-Free Resume:</strong> Raise your <strong>Index, Middle, and Ring fingers</strong> upward (pinky folded) to resume gameplay touch-free!
           </div>
@@ -63,6 +63,8 @@ export class PauseScreen {
 
   bindEvents() {
     this.element.querySelector('#btn-pause-resume').onclick = () => {
+      if (this.isResuming) return;
+      this.isResuming = true;
       Sound.playClick();
       this.onAction('RESUME');
     };
@@ -95,11 +97,15 @@ export class PauseScreen {
   }
 
   triggerResume() {
+    if (this.isResuming) return;
+    this.isResuming = true;
+
     if (this.resumeFeedbackEl) {
       this.resumeFeedbackEl.classList.remove('hidden');
     }
     Sound.playPowerup();
     setTimeout(() => {
+      this.isResuming = false;
       if (this.resumeFeedbackEl) {
         this.resumeFeedbackEl.classList.add('hidden');
       }
@@ -108,6 +114,7 @@ export class PauseScreen {
   }
 
   show(reason = 'Game paused by player.') {
+    this.isResuming = false;
     if (this.reasonText) {
       this.reasonText.textContent = reason;
     }

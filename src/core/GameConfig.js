@@ -144,8 +144,8 @@ export const GAME_CONFIG = {
     JUMP_THRESHOLD_Y: 0.28,     // Normalized Y upper boundary for jump trigger
     HOLD_PAUSE_MS: 260,         // Hold ring-finger pose for 260ms to trigger PAUSE
     HOLD_RESUME_MS: 300,        // Hold 3-finger pose (index+middle+ring) for 300ms to RESUME
-    COOLDOWN_MS: 240,           // Cooldown between repeated discrete actions
-    TRANSITION_COOLDOWN_MS: 500,// Cooldown between state transitions
+    COOLDOWN_MS: 180,           // Cooldown between repeated discrete actions (180ms for responsive control)
+    TRANSITION_COOLDOWN_MS: 450,// Cooldown between state transitions
     LANE_RESET_REQUIRED: true   // Player must return hand closer to neutral before next lane shift
   },
 

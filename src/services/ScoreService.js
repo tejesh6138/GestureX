@@ -39,51 +39,75 @@ export class ScoreService {
 
     const completedAt = runResult.completedAt || new Date().toISOString();
     const formattedResult = {
-      score: Math.floor(runResult.score),
-      coinsCollected: Math.floor(runResult.coinsCollected || 0),
-      distanceTravelled: Math.floor(runResult.distanceTravelled || 0),
-      durationSeconds: Math.floor(runResult.durationSeconds || 0),
+      score: Math.max(0, Math.floor(runResult.score)),
+      coinsCollected: Math.max(0, Math.floor(runResult.coinsCollected || 0)),
+      distanceTravelled: Math.max(0, Math.floor(runResult.distanceTravelled || 0)),
+      durationSeconds: Math.max(0, Math.floor(runResult.durationSeconds || 0)),
       highestSpeed: Number((runResult.highestSpeed || 0).toFixed(1)),
       difficulty: runResult.difficulty || 'MEDIUM',
       completedAt
     };
 
-    // 1. Update aggregate lifetime metrics
-    this.gamesPlayed += 1;
-    this.totalCoins += formattedResult.coinsCollected;
-    Storage.setItem('GAMES_PLAYED', this.gamesPlayed);
-    Storage.setItem('TOTAL_COINS', this.totalCoins);
+    // 1. Read previous stored records BEFORE updating any stored state
+    const prevStoredPB = Storage.getItem('PERSONAL_BEST', null);
+    const prevBestScore = (prevStoredPB && typeof prevStoredPB.score === 'number' && !isNaN(prevStoredPB.score))
+      ? prevStoredPB.score
+      : (typeof this.personalBest?.score === 'number' && !isNaN(this.personalBest.score) ? this.personalBest.score : 0);
 
-    // 2. Check Highest Single-Run Coin Record
+    const prevStoredCoins = Storage.getItem('HIGHEST_RUN_COINS', null);
+    const prevHighestCoins = (typeof prevStoredCoins === 'number' && !isNaN(prevStoredCoins))
+      ? prevStoredCoins
+      : (typeof this.highestRunCoins === 'number' && !isNaN(this.highestRunCoins) ? this.highestRunCoins : 0);
+
+    const prevGamesPlayed = Storage.getItem('GAMES_PLAYED', 0) || this.gamesPlayed || 0;
+
+    // 2. Determine Personal Best Score:
+    // Only set isNewHighScore = true if final score is strictly greater than previous record (> prevBestScore),
+    // and an actual prior record existed (prevBestScore > 0). First run establishes the initial baseline without false record praise.
+    let isNewHighScore = false;
+    if (prevBestScore > 0 && formattedResult.score > prevBestScore) {
+      isNewHighScore = true;
+    }
+
+    // 3. Determine Single-Run Coin Record:
+    // Only set isNewCoinRecord = true if coins collected is strictly greater than previous record (> prevHighestCoins),
+    // and an actual prior coin record existed (prevHighestCoins > 0).
     let isNewCoinRecord = false;
-    if (formattedResult.coinsCollected > this.highestRunCoins) {
-      this.highestRunCoins = formattedResult.coinsCollected;
-      Storage.setItem('HIGHEST_RUN_COINS', this.highestRunCoins);
+    if (prevHighestCoins > 0 && formattedResult.coinsCollected > prevHighestCoins) {
       isNewCoinRecord = true;
     }
 
-    // 3. Save to run history (keep last 20 runs for local leaderboard)
+    // 4. Update Lifetime Metrics
+    this.gamesPlayed = prevGamesPlayed + 1;
+    this.totalCoins = (Storage.getItem('TOTAL_COINS', 0) || this.totalCoins || 0) + formattedResult.coinsCollected;
+    Storage.setItem('GAMES_PLAYED', this.gamesPlayed);
+    Storage.setItem('TOTAL_COINS', this.totalCoins);
+
+    // 5. Update Highest Single-Run Coin Count (update if new record OR first run establishing baseline > 0)
+    if (isNewCoinRecord || formattedResult.coinsCollected > this.highestRunCoins || (prevHighestCoins === 0 && formattedResult.coinsCollected > 0)) {
+      this.highestRunCoins = Math.max(this.highestRunCoins, formattedResult.coinsCollected);
+      Storage.setItem('HIGHEST_RUN_COINS', this.highestRunCoins);
+    }
+
+    // 6. Update Personal Best (update if new record OR first run establishing baseline > 0)
+    if (isNewHighScore || formattedResult.score > (this.personalBest?.score || 0) || (prevBestScore === 0 && formattedResult.score > 0)) {
+      this.personalBest = {
+        ...formattedResult,
+        highestRunCoins: this.highestRunCoins
+      };
+      Storage.setItem('PERSONAL_BEST', this.personalBest);
+    }
+
+    // 7. Save to run history
+    this.runHistory = Storage.getItem('RUN_HISTORY', []) || [];
     this.runHistory.unshift(formattedResult);
     if (this.runHistory.length > 25) {
       this.runHistory = this.runHistory.slice(0, 25);
     }
     Storage.setItem('RUN_HISTORY', this.runHistory);
 
-    // 4. Check Personal Best Score
-    let isNewHighScore = false;
-    if (formattedResult.score > (this.personalBest.score || 0)) {
-      this.personalBest = {
-        ...formattedResult,
-        highestRunCoins: this.highestRunCoins
-      };
-      Storage.setItem('PERSONAL_BEST', this.personalBest);
-      isNewHighScore = true;
-    }
-
-    // 5. Attempt remote sync if DRF cloud backend is configured
-    ApiClient.submitScore(formattedResult).catch(() => {
-      // Graceful offline fallback
-    });
+    // 8. Attempt remote sync if DRF backend is configured
+    ApiClient.submitScore(formattedResult).catch(() => {});
 
     return {
       isNewHighScore,

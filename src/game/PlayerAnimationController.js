@@ -1,7 +1,7 @@
 /**
  * GestureX - Centralized Player Animation Controller
- * Manages skeletal states, smooth blend transitions, and cadence synchronization.
- * Supports: RUNNING, MOVING_LEFT, MOVING_RIGHT, JUMPING, LANDING, SLIDING, COLLISION, GAME_OVER, MENU_LEAN.
+ * Biomechanically realistic stylized runner animation engine with smooth cross-fade blending,
+ * speed-synchronized cadence, natural knee bending, foot contact, and dedicated sliding.
  */
 
 import { MathUtils } from '../utils/MathUtils.js';
@@ -29,22 +29,61 @@ export class PlayerAnimationController {
     this.landingTimer = 0;
     this.leanTimer = 0;
     this.leanDirection = 0; // -1: Left, +1: Right
+
+    // Continuous pose transform buffers for smooth cross-fading
+    this.currentPose = this.createEmptyPose();
+    this.targetPose = this.createEmptyPose();
+
+    // Secondary dynamics
+    this.backpackVelY = 0;
+    this.backpackPosY = 0.06;
+  }
+
+  createEmptyPose() {
+    return {
+      bodyContainer: { posY: 0, rotX: 0, rotY: 0, rotZ: 0 },
+      torso: { posY: 0.98, rotX: -0.15, rotY: 0, rotZ: 0 },
+      pelvis: { posY: 0.58, rotX: 0, rotY: 0, rotZ: 0 },
+      head: { rotX: 0.08, rotY: 0, rotZ: 0 },
+      backpack: { posY: 0.06, rotX: 0.06 },
+      leftShoulder: { rotX: 0, rotY: 0, rotZ: -0.16 },
+      leftElbow: { rotX: -0.55, rotY: 0, rotZ: 0 },
+      rightShoulder: { rotX: 0, rotY: 0, rotZ: 0.16 },
+      rightElbow: { rotX: -0.55, rotY: 0, rotZ: 0 },
+      leftThigh: { rotX: 0, rotY: 0, rotZ: 0 },
+      leftKnee: { rotX: -0.2, rotY: 0, rotZ: 0 },
+      leftAnkle: { rotX: 0, rotY: 0, rotZ: 0 },
+      rightThigh: { rotX: 0, rotY: 0, rotZ: 0 },
+      rightKnee: { rotX: -0.2, rotY: 0, rotZ: 0 },
+      rightAnkle: { rotX: 0, rotY: 0, rotZ: 0 }
+    };
   }
 
   setState(newState) {
     if (this.currentState === newState) return;
+
+    // Preserve transient animations (LANDING, lane leans) if transition to RUNNING is requested while timers are active
+    if (newState === ANIM_STATES.RUNNING) {
+      if (this.currentState === ANIM_STATES.LANDING && this.landingTimer > 0) {
+        return;
+      }
+      if ((this.currentState === ANIM_STATES.MOVING_LEFT || this.currentState === ANIM_STATES.MOVING_RIGHT) && this.leanTimer > 0) {
+        return;
+      }
+    }
+
     this.previousState = this.currentState;
     this.currentState = newState;
     this.stateTime = 0;
 
     if (newState === ANIM_STATES.LANDING) {
-      this.landingTimer = 0.18; // Brief knee absorption
+      this.landingTimer = 0.16; // Knee compression absorption
     } else if (newState === ANIM_STATES.MOVING_LEFT) {
       this.leanDirection = -1;
-      this.leanTimer = 0.28;
+      this.leanTimer = 0.26;
     } else if (newState === ANIM_STATES.MOVING_RIGHT) {
       this.leanDirection = 1;
-      this.leanTimer = 0.28;
+      this.leanTimer = 0.26;
     }
   }
 
@@ -68,6 +107,12 @@ export class PlayerAnimationController {
     this.isPaused = false;
     this.landingTimer = 0;
     this.leanTimer = 0;
+    this.leanDirection = 0;
+    this.backpackVelY = 0;
+    this.backpackPosY = 0.06;
+    this.currentPose = this.createEmptyPose();
+    this.targetPose = this.createEmptyPose();
+    this.applyPoseToHierarchy();
   }
 
   update(dt, speed = 22.0, playerPos = { x: 0, y: 0, z: 0 }) {
@@ -75,11 +120,13 @@ export class PlayerAnimationController {
 
     this.stateTime += dt;
 
-    // Advance running stride cadence proportional to forward gameplay speed
-    const cadenceSpeed = Math.max(12.0, speed) * 0.42;
+    // Stride cadence synchronized with apparent ground movement
+    // Average stride length = 2.45m; cadence = speed / strideLength * 2*PI
+    const strideLength = 2.45;
+    const cadenceSpeed = (Math.max(12.0, speed) / strideLength) * (Math.PI * 2);
     this.runCycle += dt * cadenceSpeed;
 
-    // Handle temporary animation timer transitions
+    // Temporary state timers
     if (this.landingTimer > 0) {
       this.landingTimer -= dt;
       if (this.landingTimer <= 0 && this.currentState === ANIM_STATES.LANDING) {
@@ -94,256 +141,450 @@ export class PlayerAnimationController {
       }
     }
 
-    // Apply skeletal joint poses based on active state
+    // Safety synchronization between world position and animation state:
+    // If character is grounded (playerPos.y <= 0.001) but animator is still in JUMPING state, trigger landing compression
+    if (playerPos.y <= 0.001 && this.currentState === ANIM_STATES.JUMPING) {
+      this.setState(ANIM_STATES.LANDING);
+    }
+
+    // 1. Calculate Target Skeletal Pose for active state
     switch (this.currentState) {
       case ANIM_STATES.RUNNING:
-        this.applyRunningPose(dt);
+        this.computeRunningPose(speed, dt);
         break;
 
       case ANIM_STATES.MOVING_LEFT:
       case ANIM_STATES.MOVING_RIGHT:
-        this.applyLaneShiftPose(dt);
+        this.computeLaneShiftPose(speed, dt);
         break;
 
       case ANIM_STATES.JUMPING:
-        this.applyJumpingPose(dt, playerPos.y);
+        this.computeJumpingPose(playerPos.y, dt);
         break;
 
       case ANIM_STATES.LANDING:
-        this.applyLandingPose(dt);
+        this.computeLandingPose(dt);
         break;
 
       case ANIM_STATES.SLIDING:
-        this.applySlidingPose(dt);
+        this.computeSlidingPose(dt, speed);
         break;
 
       case ANIM_STATES.COLLISION:
       case ANIM_STATES.GAME_OVER:
-        this.applyCollisionPose(dt);
+        this.computeCollisionPose(dt);
         break;
 
       case ANIM_STATES.MENU_LEAN:
-        this.applyMenuLeanPose(dt);
+        this.computeMenuLeanPose(dt);
         break;
 
       default:
-        this.applyRunningPose(dt);
+        this.computeRunningPose(speed, dt);
     }
+
+    // 2. Smoothly damp all current skeletal joint transforms toward target pose
+    // Eliminates sudden snapping or stepping
+    const blendRate = 22.0; // Responsive damping (~50-80ms blend window)
+    this.blendPose(dt, blendRate);
+
+    // 3. Apply smoothed pose transforms to Three.js hierarchy
+    this.applyPoseToHierarchy();
   }
 
   /**
-   * Continuous Streetwear Running Cycle:
-   * Alternating 2-segment leg strides with realistic knee flex and heel-toe strike,
-   * counter-swinging arms with bent elbows, subtle torso sway, and backpack bounce.
+   * Biomechanically Realistic Stylized Running Gait:
+   * - Smooth continuous harmonic leg cycling (no conditional step pops)
+   * - Speed-responsive forward torso sprint tilt
+   * - Dual-peak pelvic vertical oscillation (flight vs stance impact)
+   * - Pelvic roll & yaw with counter-torso spinal twist
+   * - Opposing arm counter-swing with dynamic elbow drive
+   * - Natural heel-strike to toe-off ankle roll
+   * - Head stabilization and dynamic backpack bounce
    */
-  applyRunningPose(dt) {
-    const p = this.player;
+  computeRunningPose(speed, dt) {
     const cycle = this.runCycle;
+    const t = this.targetPose;
 
-    // Sinusoidal stride phases
-    const leftStride = Math.sin(cycle);
-    const rightStride = -leftStride;
+    // Left and Right leg phases (180 degrees opposing)
+    const leftPhase = cycle;
+    const rightPhase = cycle + Math.PI;
 
-    // 1. Torso & Pelvis dynamics
-    // Vertical bobbing (two bobs per full stride cycle)
-    const bob = Math.abs(Math.sin(cycle)) * 0.07;
-    p.torso.position.y = 0.98 + bob;
-    // Natural forward sprint lean
-    p.torso.rotation.x = -0.15;
-    // Slight pelvic sway with stride
-    p.torso.rotation.y = leftStride * 0.08;
-    p.torso.rotation.z = Math.cos(cycle) * 0.04;
+    // 1. Pelvis & Torso Dynamics
+    // Dual-peak vertical bobbing: peak in mid-flight, compression on stance strike
+    const bob = Math.cos(cycle * 2) * 0.055;
+    t.pelvis.posY = 0.58 + bob;
+    t.torso.posY = 0.98 + bob;
 
-    // 2. Head & Hood stabilization
-    p.head.rotation.x = 0.08; // Head looks slightly up to stay horizontal
-    p.head.rotation.y = -p.torso.rotation.y * 0.5; // Compensate torso twist
+    // Forward sprint lean increases with speed
+    const speedRatio = MathUtils.clamp((speed - 16.0) / 28.0, 0, 1);
+    const sprintLean = -0.16 - speedRatio * 0.12;
+    t.torso.rotX = sprintLean;
 
-    // 3. Backpack dynamic bobbing
-    if (p.backpack) {
-      p.backpack.position.y = 0.05 + Math.sin(cycle * 2) * 0.02;
-      p.backpack.rotation.x = 0.06 + Math.sin(cycle * 2) * 0.04;
-    }
+    // Pelvic list (roll toward swing side) and yaw (rotation forward with lead leg)
+    const pelvicYaw = Math.sin(cycle) * 0.09;
+    const pelvicRoll = Math.cos(cycle) * 0.04;
+    t.pelvis.rotY = pelvicYaw;
+    t.pelvis.rotZ = pelvicRoll;
 
-    // 4. Left Leg (Thigh -> Knee -> Shin -> Sneaker)
-    // When left thigh swings forward (positive X rotation in our coordinate space)
-    p.leftThigh.rotation.x = leftStride * 0.75;
-    // Knee flexes back when leg is swinging forward or recovering
-    p.leftKnee.rotation.x = leftStride > 0 ? -leftStride * 0.85 : -0.15;
-    p.leftAnkle.rotation.x = leftStride > 0 ? 0.2 : -0.25;
+    // Spinal counter-rotation in upper torso
+    t.torso.rotY = -pelvicYaw * 0.75;
+    t.torso.rotZ = -pelvicRoll * 0.7;
 
-    // 5. Right Leg (Opposite phase)
-    p.rightThigh.rotation.x = rightStride * 0.75;
-    p.rightKnee.rotation.x = rightStride > 0 ? -rightStride * 0.85 : -0.15;
-    p.rightAnkle.rotation.x = rightStride > 0 ? 0.2 : -0.25;
+    // 2. Head & Hood Stabilization
+    // Compensate torso tilt to keep eye level forward along track
+    t.head.rotX = -sprintLean * 0.65;
+    t.head.rotY = -t.torso.rotY * 0.6;
+    t.head.rotZ = 0;
 
-    // 6. Arms (Oppose legs: Left arm swings with right leg)
-    // Left Arm
-    p.leftShoulder.rotation.x = rightStride * 0.75;
-    p.leftShoulder.rotation.z = -0.12; // Natural clearance away from torso
-    p.leftElbow.rotation.x = -0.55 - Math.max(0, -rightStride) * 0.6; // Bent elbow flex
+    // 3. Dynamic Backpack Secondary Bounce
+    t.backpack.posY = 0.06 + Math.sin(cycle * 2 - 0.5) * 0.025;
+    t.backpack.rotX = 0.08 + Math.sin(cycle * 2 - 0.7) * 0.045;
 
-    // Right Arm
-    p.rightShoulder.rotation.x = leftStride * 0.75;
-    p.rightShoulder.rotation.z = 0.12;
-    p.rightElbow.rotation.x = -0.55 - Math.max(0, -leftStride) * 0.6;
+    // 4. Left Leg Kinematics (Thigh -> Knee -> Shin -> Sneaker)
+    const leftSwing = Math.sin(leftPhase);
+    // Thigh swing forward (+X) and drive back (-X)
+    t.leftThigh.rotX = leftSwing * 0.68 + Math.cos(leftPhase * 2) * 0.06;
+    t.leftThigh.rotY = -pelvicYaw * 0.4;
+    t.leftThigh.rotZ = 0;
 
-    // Reset base lateral rotation
-    p.bodyContainer.rotation.z = MathUtils.lerp(p.bodyContainer.rotation.z, 0, 0.2);
+    // Smooth continuous knee flexion: deep bend during swing recovery, slight cushion on stance
+    // Never snaps or jumps
+    const leftSwingForward = Math.max(0, leftSwing);
+    const leftSwingBack = Math.max(0, -leftSwing);
+    t.leftKnee.rotX = -0.22 - leftSwingForward * 0.95 - leftSwingBack * 0.28;
+
+    // Ankle: dorsiflexion on forward reach, plantarflexion on push-off
+    t.leftAnkle.rotX = leftSwing * 0.26 - Math.cos(leftPhase) * 0.15;
+
+    // 5. Right Leg Kinematics (Opposite 180° phase)
+    const rightSwing = Math.sin(rightPhase);
+    t.rightThigh.rotX = rightSwing * 0.68 + Math.cos(rightPhase * 2) * 0.06;
+    t.rightThigh.rotY = pelvicYaw * 0.4;
+    t.rightThigh.rotZ = 0;
+
+    const rightSwingForward = Math.max(0, rightSwing);
+    const rightSwingBack = Math.max(0, -rightSwing);
+    t.rightKnee.rotX = -0.22 - rightSwingForward * 0.95 - rightSwingBack * 0.28;
+
+    t.rightAnkle.rotX = rightSwing * 0.26 - Math.cos(rightPhase) * 0.15;
+
+    // 6. Arms Counter-Swing (Oppose legs)
+    // Left Arm swings forward with Right Leg
+    const leftArmDrive = Math.sin(rightPhase);
+    t.leftShoulder.rotX = leftArmDrive * 0.72;
+    t.leftShoulder.rotZ = -0.16; // Clearance from jacket
+    t.leftShoulder.rotY = -leftArmDrive * 0.10;
+    // Elbow flexes more forward (-1.1 rad), relaxes back (-0.4 rad)
+    t.leftElbow.rotX = -0.65 - Math.max(0, leftArmDrive) * 0.50;
+
+    // Right Arm swings forward with Left Leg
+    const rightArmDrive = Math.sin(leftPhase);
+    t.rightShoulder.rotX = rightArmDrive * 0.72;
+    t.rightShoulder.rotZ = 0.16;
+    t.rightShoulder.rotY = rightArmDrive * 0.10;
+    t.rightElbow.rotX = -0.65 - Math.max(0, rightArmDrive) * 0.50;
+
+    t.bodyContainer.rotZ = 0;
   }
 
   /**
    * Lane Shift Dodge / Lean:
-   * Body leans in direction of movement, lead hip and arm shift naturally.
+   * Body banks smoothly into the turn, leading hip shifts.
    */
-  applyLaneShiftPose(dt) {
-    this.applyRunningPose(dt);
-    const p = this.player;
-    const targetLean = this.leanDirection * -0.22; // Bank into the turn
-    p.bodyContainer.rotation.z = MathUtils.lerp(p.bodyContainer.rotation.z, targetLean, 0.25);
-    p.torso.rotation.y = this.leanDirection * 0.12;
+  computeLaneShiftPose(speed, dt) {
+    this.computeRunningPose(speed, dt);
+    const t = this.targetPose;
+    const bankAngle = this.leanDirection * -0.24; // Lean into the turn
+    t.bodyContainer.rotZ = bankAngle;
+    t.torso.rotY += this.leanDirection * 0.14;
+    t.torso.rotZ += bankAngle * 0.3;
   }
 
   /**
-   * Natural Airborne Jump:
-   * Knees tucked up for hurdle clearance, arms extended back/out for balance.
+   * Dedicated Crouch Slide:
+   * - Center of mass lowered significantly beneath overhead clearance gantries.
+   * - Lead leg extended forward skimming rails, trail leg tucked under pelvis.
+   * - Torso leaned low and forward.
+   * - Left hand down near track for balance, right arm sweeping back.
+   * - Head tilted up to face forward under obstacle.
    */
-  applyJumpingPose(dt, height) {
-    const p = this.player;
+  computeSlidingPose(dt, speed) {
+    const t = this.targetPose;
 
-    p.torso.position.y = 1.05;
-    p.torso.rotation.x = -0.05; // Upright in air
-    p.torso.rotation.y = 0;
-    p.torso.rotation.z = 0;
+    // Low center of mass
+    t.pelvis.posY = 0.26;
+    t.torso.posY = 0.44;
+    t.torso.rotX = -0.68; // Deep forward crouch lean
+    t.torso.rotY = 0.12;
+    t.torso.rotZ = -0.04;
 
-    // Knees tucked up
-    p.leftThigh.rotation.x = 0.85;
-    p.leftKnee.rotation.x = -1.25;
-    p.leftAnkle.rotation.x = 0.35;
+    // Head tilted up relative to leaned torso so character looks forward down the track
+    t.head.rotX = 0.38;
+    t.head.rotY = -0.10;
+    t.head.rotZ = 0;
 
-    p.rightThigh.rotation.x = 0.55;
-    p.rightKnee.rotation.x = -0.95;
-    p.rightAnkle.rotation.x = 0.25;
+    // Lead Right Leg: extended forward skimming the track
+    t.rightThigh.rotX = 1.35;
+    t.rightThigh.rotY = 0.08;
+    t.rightThigh.rotZ = 0.05;
+    t.rightKnee.rotX = -0.18; // Nearly straight
+    t.rightAnkle.rotX = -0.25;
 
-    // Arms extended out and slightly back for athletic balance
-    p.leftShoulder.rotation.x = 0.65;
-    p.leftShoulder.rotation.z = -0.45;
-    p.leftElbow.rotation.x = -0.65;
+    // Trail Left Leg: tucked tightly beneath pelvis
+    t.leftThigh.rotX = -0.82;
+    t.leftThigh.rotY = -0.12;
+    t.leftThigh.rotZ = -0.10;
+    t.leftKnee.rotX = -1.68; // Sharply folded knee
+    t.leftAnkle.rotX = 0.60;
 
-    p.rightShoulder.rotation.x = 0.65;
-    p.rightShoulder.rotation.z = 0.45;
-    p.rightElbow.rotation.x = -0.65;
+    // Left Arm: low near track surface for stability
+    t.leftShoulder.rotX = 0.58;
+    t.leftShoulder.rotZ = -0.52;
+    t.leftShoulder.rotY = 0.15;
+    t.leftElbow.rotX = -0.38;
 
-    if (p.backpack) {
-      p.backpack.position.y = 0.08;
-    }
+    // Right Arm: trailing backward for balance
+    t.rightShoulder.rotX = -0.92;
+    t.rightShoulder.rotZ = 0.38;
+    t.rightShoulder.rotY = -0.12;
+    t.rightElbow.rotX = -0.62;
+
+    // Backpack tilted forward
+    t.backpack.posY = 0.08;
+    t.backpack.rotX = 0.18;
+
+    t.bodyContainer.rotZ = 0;
+  }
+
+  /**
+   * Athletic Airborne Jump:
+   * Knees tucked up for hurdle clearance, arms extended out/back for athletic balance.
+   */
+  computeJumpingPose(height, dt) {
+    const t = this.targetPose;
+
+    t.pelvis.posY = 0.62;
+    t.torso.posY = 1.05;
+    t.torso.rotX = -0.08;
+    t.torso.rotY = 0;
+    t.torso.rotZ = 0;
+
+    t.head.rotX = 0.05;
+    t.head.rotY = 0;
+    t.head.rotZ = 0;
+
+    // Knees tucked up high
+    t.leftThigh.rotX = 0.95;
+    t.leftKnee.rotX = -1.35;
+    t.leftAnkle.rotX = 0.35;
+
+    t.rightThigh.rotX = 0.72;
+    t.rightKnee.rotX = -1.12;
+    t.rightAnkle.rotX = 0.28;
+
+    // Athletic balance arm spread
+    t.leftShoulder.rotX = 0.65;
+    t.leftShoulder.rotZ = -0.45;
+    t.leftElbow.rotX = -0.68;
+
+    t.rightShoulder.rotX = 0.65;
+    t.rightShoulder.rotZ = 0.45;
+    t.rightElbow.rotX = -0.68;
+
+    t.backpack.posY = 0.09;
+    t.backpack.rotX = 0.05;
+    t.bodyContainer.rotZ = 0;
   }
 
   /**
    * Landing Compression:
-   * Knees flex to absorb downward momentum before springing into run.
+   * Deep knee squat cushion absorbing downward momentum before springing into run.
    */
-  applyLandingPose(dt) {
-    const p = this.player;
+  computeLandingPose(dt) {
+    const t = this.targetPose;
 
-    p.torso.position.y = 0.82; // Deep knee squat
-    p.torso.rotation.x = -0.25;
+    t.pelvis.posY = 0.42;
+    t.torso.posY = 0.78;
+    t.torso.rotX = -0.28;
+    t.torso.rotY = 0;
+    t.torso.rotZ = 0;
 
-    p.leftThigh.rotation.x = 0.55;
-    p.leftKnee.rotation.x = -0.85;
-    p.rightThigh.rotation.x = 0.55;
-    p.rightKnee.rotation.x = -0.85;
+    t.head.rotX = 0.12;
 
-    p.leftShoulder.rotation.x = -0.4;
-    p.rightShoulder.rotation.x = -0.4;
+    t.leftThigh.rotX = 0.68;
+    t.leftKnee.rotX = -0.95;
+    t.leftAnkle.rotX = -0.15;
+
+    t.rightThigh.rotX = 0.68;
+    t.rightKnee.rotX = -0.95;
+    t.rightAnkle.rotX = -0.15;
+
+    t.leftShoulder.rotX = -0.45;
+    t.leftShoulder.rotZ = -0.25;
+    t.leftElbow.rotX = -0.85;
+
+    t.rightShoulder.rotX = -0.45;
+    t.rightShoulder.rotZ = 0.25;
+    t.rightElbow.rotX = -0.85;
+
+    t.backpack.posY = 0.04;
+    t.bodyContainer.rotZ = 0;
   }
 
-  /**
-   * Streetwear Crouch Slide:
-   * Torso leans forward low beneath overhead gantries, lead leg extended forward,
-   * trail knee tucked beneath, left hand touching near ground for balance.
-   */
-  applySlidingPose(dt) {
-    const p = this.player;
-
-    p.torso.position.y = 0.48; // Low center of gravity
-    p.torso.rotation.x = -0.65; // Forward lean
-    p.torso.rotation.y = 0.15;
-
-    // Lead leg extended forward
-    p.leftThigh.rotation.x = 1.35;
-    p.leftKnee.rotation.x = -0.25;
-    p.leftAnkle.rotation.x = -0.4;
-
-    // Trail leg folded under
-    p.rightThigh.rotation.x = -0.75;
-    p.rightKnee.rotation.x = -1.55;
-    p.rightAnkle.rotation.x = 0.5;
-
-    // Left arm down stabilizing near track
-    p.leftShoulder.rotation.x = 0.45;
-    p.leftShoulder.rotation.z = -0.55;
-    p.leftElbow.rotation.x = -0.45;
-
-    // Right arm trailing back
-    p.rightShoulder.rotation.x = -0.95;
-    p.rightShoulder.rotation.z = 0.35;
-    p.rightElbow.rotation.x = -0.55;
+  computeCollisionPose(dt) {
+    const t = this.targetPose;
+    t.torso.posY = 0.35;
+    t.torso.rotX = -0.85;
+    t.leftThigh.rotX = 0.9;
+    t.rightThigh.rotX = -0.5;
+    t.leftShoulder.rotX = -0.8;
+    t.rightShoulder.rotX = 0.5;
   }
 
-  /**
-   * Collision stumble / fall.
-   */
-  applyCollisionPose(dt) {
-    const p = this.player;
-    p.torso.position.y = Math.max(0.2, p.torso.position.y - dt * 2.0);
-    p.torso.rotation.x = -0.8;
-    p.leftThigh.rotation.x = 0.8;
-    p.rightThigh.rotation.x = -0.4;
+  computeMenuLeanPose(dt) {
+    const t = this.targetPose;
+    const time = this.stateTime;
+    const breath = Math.sin(time * 1.8) * 0.012;
+
+    t.pelvis.posY = 0.58;
+    t.torso.posY = 1.02 + breath;
+    t.torso.rotX = 0.02;
+    t.torso.rotY = -0.12;
+    t.torso.rotZ = 0.04;
+
+    t.head.rotX = -0.04;
+    t.head.rotY = -0.12 + Math.sin(time * 0.7) * 0.04;
+    t.head.rotZ = -0.03;
+
+    t.rightShoulder.rotX = 0.18;
+    t.rightShoulder.rotY = -0.12;
+    t.rightShoulder.rotZ = -0.72;
+    t.rightElbow.rotX = -0.65;
+    t.rightElbow.rotZ = -0.25;
+
+    t.leftShoulder.rotX = -0.1;
+    t.leftShoulder.rotY = 0.08;
+    t.leftShoulder.rotZ = 0.18;
+    t.leftElbow.rotX = -0.3;
+
+    t.rightThigh.rotX = -0.02;
+    t.rightKnee.rotX = -0.02;
+    t.rightAnkle.rotX = 0.02;
+
+    t.leftThigh.rotX = 0.12;
+    t.leftKnee.rotX = -0.24;
+    t.leftAnkle.rotX = 0.1;
+
+    t.backpack.posY = 0.06;
+    t.backpack.rotX = 0.04;
+    t.bodyContainer.rotZ = 0;
   }
 
-  /**
-   * Main Menu Hero Pose:
-   * Standing on right side of landing page, turned toward the viewer (front-facing),
-   * leaning casually with one arm resting on the hero panel, relaxed stance,
-   * subtle breathing and gentle idle head movements.
-   */
-  applyMenuLeanPose(dt) {
+  blendPose(dt, lambda) {
+    const c = this.currentPose;
+    const t = this.targetPose;
+
+    const damp = (curr, target) => MathUtils.damp(curr, target, lambda, dt);
+
+    // Torso & Pelvis
+    c.torso.posY = damp(c.torso.posY, t.torso.posY);
+    c.torso.rotX = damp(c.torso.rotX, t.torso.rotX);
+    c.torso.rotY = damp(c.torso.rotY, t.torso.rotY);
+    c.torso.rotZ = damp(c.torso.rotZ, t.torso.rotZ);
+
+    c.pelvis.posY = damp(c.pelvis.posY, t.pelvis.posY);
+    c.pelvis.rotY = damp(c.pelvis.rotY, t.pelvis.rotY);
+    c.pelvis.rotZ = damp(c.pelvis.rotZ, t.pelvis.rotZ);
+
+    // Head
+    c.head.rotX = damp(c.head.rotX, t.head.rotX);
+    c.head.rotY = damp(c.head.rotY, t.head.rotY);
+    c.head.rotZ = damp(c.head.rotZ, t.head.rotZ);
+
+    // Backpack
+    c.backpack.posY = damp(c.backpack.posY, t.backpack.posY);
+    c.backpack.rotX = damp(c.backpack.rotX, t.backpack.rotX);
+
+    // Arms
+    c.leftShoulder.rotX = damp(c.leftShoulder.rotX, t.leftShoulder.rotX);
+    c.leftShoulder.rotY = damp(c.leftShoulder.rotY, t.leftShoulder.rotY);
+    c.leftShoulder.rotZ = damp(c.leftShoulder.rotZ, t.leftShoulder.rotZ);
+    c.leftElbow.rotX = damp(c.leftElbow.rotX, t.leftElbow.rotX);
+
+    c.rightShoulder.rotX = damp(c.rightShoulder.rotX, t.rightShoulder.rotX);
+    c.rightShoulder.rotY = damp(c.rightShoulder.rotY, t.rightShoulder.rotY);
+    c.rightShoulder.rotZ = damp(c.rightShoulder.rotZ, t.rightShoulder.rotZ);
+    c.rightElbow.rotX = damp(c.rightElbow.rotX, t.rightElbow.rotX);
+
+    // Legs
+    c.leftThigh.rotX = damp(c.leftThigh.rotX, t.leftThigh.rotX);
+    c.leftThigh.rotY = damp(c.leftThigh.rotY, t.leftThigh.rotY);
+    c.leftThigh.rotZ = damp(c.leftThigh.rotZ, t.leftThigh.rotZ);
+    c.leftKnee.rotX = damp(c.leftKnee.rotX, t.leftKnee.rotX);
+    c.leftAnkle.rotX = damp(c.leftAnkle.rotX, t.leftAnkle.rotX);
+
+    c.rightThigh.rotX = damp(c.rightThigh.rotX, t.rightThigh.rotX);
+    c.rightThigh.rotY = damp(c.rightThigh.rotY, t.rightThigh.rotY);
+    c.rightThigh.rotZ = damp(c.rightThigh.rotZ, t.rightThigh.rotZ);
+    c.rightKnee.rotX = damp(c.rightKnee.rotX, t.rightKnee.rotX);
+    c.rightAnkle.rotX = damp(c.rightAnkle.rotX, t.rightAnkle.rotX);
+
+    // Body container banking
+    c.bodyContainer.rotZ = damp(c.bodyContainer.rotZ, t.bodyContainer.rotZ);
+  }
+
+  applyPoseToHierarchy() {
     const p = this.player;
-    const t = this.stateTime;
+    const c = this.currentPose;
 
-    // Gentle breathing cycle
-    const breath = Math.sin(t * 1.8) * 0.012;
+    // Body Container
+    p.bodyContainer.rotation.z = c.bodyContainer.rotZ;
 
-    // Natural standing height
-    p.torso.position.y = 1.02 + breath;
-    p.torso.rotation.x = 0.02;
-    p.torso.rotation.y = -0.12; // Casually angled toward viewer
-    p.torso.rotation.z = 0.04;  // Hip weight shift
+    // Torso
+    p.torso.position.y = c.torso.posY;
+    p.torso.rotation.x = c.torso.rotX;
+    p.torso.rotation.y = c.torso.rotY;
+    p.torso.rotation.z = c.torso.rotZ;
 
-    p.head.rotation.x = -0.04;
-    p.head.rotation.y = -0.12 + Math.sin(t * 0.7) * 0.04; // Friendly confident look at viewer
-    p.head.rotation.z = -0.03;
+    // Pelvis
+    p.pelvis.position.y = c.pelvis.posY;
+    p.pelvis.rotation.y = c.pelvis.rotY;
+    p.pelvis.rotation.z = c.pelvis.rotZ;
 
-    // Right Arm resting naturally on the decorative hero panel/pedestal
-    p.rightShoulder.rotation.x = 0.18;
-    p.rightShoulder.rotation.y = -0.12;
-    p.rightShoulder.rotation.z = -0.72; // Raised outward toward pedestal
-    p.rightElbow.rotation.x = -0.65;
-    p.rightElbow.rotation.z = -0.25;
+    // Head
+    p.head.rotation.x = c.head.rotX;
+    p.head.rotation.y = c.head.rotY;
+    p.head.rotation.z = c.head.rotZ;
 
-    // Left Arm relaxed naturally near waist / jacket pocket
-    p.leftShoulder.rotation.x = -0.1;
-    p.leftShoulder.rotation.y = 0.08;
-    p.leftShoulder.rotation.z = 0.18;
-    p.leftElbow.rotation.x = -0.3;
+    // Backpack
+    if (p.backpack) {
+      p.backpack.position.y = c.backpack.posY;
+      p.backpack.rotation.x = c.backpack.rotX;
+    }
 
-    // Weight shifted stance: solid right leg, relaxed left leg
-    p.rightThigh.rotation.x = -0.02;
-    p.rightKnee.rotation.x = -0.02;
-    p.rightAnkle.rotation.x = 0.02;
+    // Shoulders & Arms
+    p.leftShoulder.rotation.x = c.leftShoulder.rotX;
+    p.leftShoulder.rotation.y = c.leftShoulder.rotY;
+    p.leftShoulder.rotation.z = c.leftShoulder.rotZ;
+    p.leftElbow.rotation.x = c.leftElbow.rotX;
 
-    p.leftThigh.rotation.x = 0.12;
-    p.leftKnee.rotation.x = -0.24;
-    p.leftAnkle.rotation.x = 0.1;
+    p.rightShoulder.rotation.x = c.rightShoulder.rotX;
+    p.rightShoulder.rotation.y = c.rightShoulder.rotY;
+    p.rightShoulder.rotation.z = c.rightShoulder.rotZ;
+    p.rightElbow.rotation.x = c.rightElbow.rotX;
+
+    // Thighs, Knees & Ankles
+    p.leftThigh.rotation.x = c.leftThigh.rotX;
+    p.leftThigh.rotation.y = c.leftThigh.rotY;
+    p.leftThigh.rotation.z = c.leftThigh.rotZ;
+    p.leftKnee.rotation.x = c.leftKnee.rotX;
+    p.leftAnkle.rotation.x = c.leftAnkle.rotX;
+
+    p.rightThigh.rotation.x = c.rightThigh.rotX;
+    p.rightThigh.rotation.y = c.rightThigh.rotY;
+    p.rightThigh.rotation.z = c.rightThigh.rotZ;
+    p.rightKnee.rotation.x = c.rightKnee.rotX;
+    p.rightAnkle.rotation.x = c.rightAnkle.rotX;
   }
 }

@@ -20,6 +20,7 @@ export class PowerUpManager {
     this.scene = scene;
     this.player = player;
     this.items = [];
+    this.pool = [];
     this.nextSpawnZ = -60;
     this.lanes = [GAME_CONFIG.LANES.LEFT_X, GAME_CONFIG.LANES.CENTER_X, GAME_CONFIG.LANES.RIGHT_X];
 
@@ -73,7 +74,7 @@ export class PowerUpManager {
 
     group.add(mesh);
     this.scene.add(group);
-    return { group, mesh, type };
+    return { group, mesh, type, active: true };
   }
 
   spawnPowerUp(z) {
@@ -81,9 +82,15 @@ export class PowerUpManager {
     const type = MathUtils.randomChoice(types);
     const lane = MathUtils.randomChoice(this.lanes);
 
-    const item = this.createPowerUpMesh(type);
-    item.group.position.set(lane, 1.2, z);
+    let item = this.pool.find((p) => !p.active && p.type === type);
+    if (!item) {
+      item = this.createPowerUpMesh(type);
+      this.pool.push(item);
+    }
+
     item.active = true;
+    item.group.visible = true;
+    item.group.position.set(lane, 1.2, z);
     this.items.push(item);
   }
 
@@ -94,7 +101,8 @@ export class PowerUpManager {
       this.nextSpawnZ -= MathUtils.randomRange(70, 110);
     }
 
-    // 2. Animate and check collection
+    // 2. Animate and check collection with squared-distance check
+    const pY = playerPos.y + 0.9;
     for (let i = this.items.length - 1; i >= 0; i--) {
       const item = this.items[i];
       if (!item.active) continue;
@@ -102,12 +110,13 @@ export class PowerUpManager {
       item.mesh.rotation.x += dt * 2.0;
       item.mesh.rotation.y += dt * 3.0;
 
-      const dist = MathUtils.distance3D(
-        playerPos.x, playerPos.y + 0.9, playerPos.z,
-        item.group.position.x, item.group.position.y, item.group.position.z
-      );
+      const dx = playerPos.x - item.group.position.x;
+      const dy = pY - item.group.position.y;
+      const dz = playerPos.z - item.group.position.z;
+      const distSq = dx * dx + dy * dy + dz * dz;
 
-      if (dist < 1.4) {
+      // 1.4m collection radius -> 1.4^2 = 1.96
+      if (distSq < 1.96) {
         this.activatePowerUp(item.type);
         item.active = false;
         item.group.visible = false;
@@ -181,7 +190,7 @@ export class PowerUpManager {
   }
 
   reset() {
-    for (const item of this.items) {
+    for (const item of this.pool) {
       item.active = false;
       item.group.visible = false;
     }

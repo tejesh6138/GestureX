@@ -11,6 +11,34 @@ import { Calibration } from '../gesture/GestureCalibration.js';
 import { Sound } from '../services/SoundService.js';
 import { GlobalEvents, EVENTS } from '../core/EventBus.js';
 
+export const SETUP_STATES = {
+  CAMERA: {
+    INITIALIZING: 'Initializing',
+    READY: 'Ready',
+    PERMISSION_DENIED: 'Permission Denied',
+    UNAVAILABLE: 'Unavailable',
+    DISCONNECTED: 'Disconnected'
+  },
+  MODEL: {
+    NOT_LOADED: 'Not Loaded',
+    LOADING: 'Loading',
+    READY: 'Ready',
+    LOAD_FAILED: 'Load Failed'
+  },
+  TRACKING: {
+    WAITING: 'Waiting for Camera and Model',
+    NO_HAND: 'No Hand Detected',
+    HAND_DETECTED: 'Hand Detected',
+    TRACKING_LOST: 'Tracking Lost'
+  },
+  INFERENCE: {
+    INITIALIZING: 'Initializing',
+    ACTIVE: 'Active',
+    PAUSED: 'Paused',
+    ERROR: 'Error'
+  }
+};
+
 export class CameraSetupScreen {
   constructor(container, onAction) {
     this.container = container;
@@ -23,6 +51,13 @@ export class CameraSetupScreen {
     this.latestHandData = null;
     this.latestClassification = null;
     this.lastHandSeenTime = 0;
+
+    // Logical state management
+    this.cameraState = Camera.isReady ? SETUP_STATES.CAMERA.READY : SETUP_STATES.CAMERA.UNAVAILABLE;
+    this.modelState = MediaPipe.isLoaded ? SETUP_STATES.MODEL.READY : SETUP_STATES.MODEL.NOT_LOADED;
+    this.isInitializingCamera = false;
+    this.isInitializingModel = false;
+    this.modelErrorMessage = null;
 
     this.build();
     this.bindGlobalEvents();
@@ -42,7 +77,7 @@ export class CameraSetupScreen {
         </p>
 
         <div class="setup-grid">
-          <!-- Left: Live Video Mirror Canvas -->
+          <!-- Left: Live Points-Only Digital Mirror Canvas -->
           <div class="camera-preview-container">
             <canvas id="setup-preview-canvas" width="480" height="360" class="setup-canvas"></canvas>
             <div id="setup-status-overlay" class="setup-status-overlay">
@@ -59,12 +94,12 @@ export class CameraSetupScreen {
 
             <div class="diag-item" id="diag-model">
               <span class="diag-icon">⚪</span>
-              <span class="diag-text">AI Model: <strong id="diag-model-val">Uninitialized</strong></span>
+              <span class="diag-text">AI Model: <strong id="diag-model-val">Not Loaded</strong></span>
             </div>
 
             <div class="diag-item" id="diag-hand">
               <span class="diag-icon">⚪</span>
-              <span class="diag-text">Hand Tracking: <strong id="diag-hand-val">Camera Offline</strong></span>
+              <span class="diag-text">Hand Tracking: <strong id="diag-hand-val">Waiting for Camera and Model</strong></span>
             </div>
 
             <div class="diag-item" id="diag-fps">
@@ -72,12 +107,14 @@ export class CameraSetupScreen {
               <span class="diag-text">Inference Engine: <strong id="diag-fps-val">-- FPS</strong></span>
             </div>
 
+            <div id="setup-error-box" class="hidden" style="display: none; color: #dc2626; font-size: 0.85rem; background: #fee2e2; border: 1px solid #f87171; border-radius: 8px; padding: 8px 12px; margin-top: 10px; font-weight: 500;"></div>
+
             <div class="guidance-box">
               <h4>💡 Positioning Tips:</h4>
               <ul>
                 <li>Hold hand 1.5 to 2.5 feet from camera.</li>
                 <li>Keep entire hand and wrist visible in frame.</li>
-                <li>Ensure sufficient room lighting.</li>
+                <li>Ensure sufficient room lighting without glare.</li>
               </ul>
             </div>
 
@@ -91,6 +128,9 @@ export class CameraSetupScreen {
         <div class="setup-actions">
           <button id="btn-enable-cam" class="btn btn-primary">
             📷 ENABLE CAMERA
+          </button>
+          <button id="btn-retry-model" class="btn btn-secondary btn-glow hidden" style="display: none;">
+            🔄 RETRY AI MODEL
           </button>
           <button id="btn-start-calibrated" class="btn btn-primary btn-glow" disabled>
             🖐️ CONTINUE TO TUTORIAL
@@ -108,6 +148,7 @@ export class CameraSetupScreen {
     this.previewCtx = this.previewCanvas.getContext('2d');
 
     this.bindEvents();
+    this.updateUI();
   }
 
   bindGlobalEvents() {
@@ -128,12 +169,31 @@ export class CameraSetupScreen {
       this.latestHandData = null;
       this.latestClassification = null;
     });
+
+    GlobalEvents.on(EVENTS.CAMERA_READY, () => {
+      this.cameraState = SETUP_STATES.CAMERA.READY;
+      this.updateUI();
+    });
+
+    GlobalEvents.on(EVENTS.CAMERA_ERROR, ({ message }) => {
+      if (Camera.state === CAMERA_STATES.PERMISSION_DENIED) {
+        this.cameraState = SETUP_STATES.CAMERA.PERMISSION_DENIED;
+      } else {
+        this.cameraState = SETUP_STATES.CAMERA.UNAVAILABLE;
+      }
+      this.updateUI();
+    });
   }
 
   bindEvents() {
     this.element.querySelector('#btn-enable-cam').onclick = async () => {
       Sound.playClick();
-      await this.initCameraAndModel();
+      await this.initCamera();
+    };
+
+    this.element.querySelector('#btn-retry-model').onclick = async () => {
+      Sound.playClick();
+      await this.initModel();
     };
 
     this.element.querySelector('#btn-start-calibrated').onclick = () => {
@@ -150,70 +210,239 @@ export class CameraSetupScreen {
     };
   }
 
-  async initCameraAndModel() {
-    const btnEnable = this.element.querySelector('#btn-enable-cam');
-    btnEnable.disabled = true;
-    btnEnable.textContent = 'REQUESTING CAMERA...';
+  async initCamera() {
+    if (this.isInitializingCamera) return;
+    this.isInitializingCamera = true;
+    this.cameraState = SETUP_STATES.CAMERA.INITIALIZING;
+    this.updateUI();
+
+    const camResult = await Camera.requestCamera();
+    this.isInitializingCamera = false;
+
+    if (camResult.success) {
+      this.cameraState = SETUP_STATES.CAMERA.READY;
+      this.updateUI();
+
+      // Start canvas preview immediately
+      this.startPreviewLoop();
+
+      // If model is not loaded yet, initiate model loading
+      if (!MediaPipe.isLoaded && !this.isInitializingModel) {
+        await this.initModel();
+      }
+    } else {
+      if (Camera.state === CAMERA_STATES.PERMISSION_DENIED) {
+        this.cameraState = SETUP_STATES.CAMERA.PERMISSION_DENIED;
+      } else {
+        this.cameraState = SETUP_STATES.CAMERA.UNAVAILABLE;
+      }
+      this.updateUI();
+    }
+  }
+
+  async initModel() {
+    if (this.isInitializingModel) return;
+    this.isInitializingModel = true;
+    this.modelState = SETUP_STATES.MODEL.LOADING;
+    this.modelErrorMessage = null;
+    this.updateUI();
+
+    try {
+      await MediaPipe.init();
+      this.modelState = SETUP_STATES.MODEL.READY;
+      this.modelErrorMessage = null;
+    } catch (e) {
+      console.error('[CameraSetupScreen] MediaPipe initialization error:', e);
+      this.modelState = SETUP_STATES.MODEL.LOAD_FAILED;
+      this.modelErrorMessage = e.message || 'MediaPipe model failed to load';
+    } finally {
+      this.isInitializingModel = false;
+      this.updateUI();
+      if (Camera.isReady) {
+        this.startPreviewLoop();
+      }
+    }
+  }
+
+  updateUI() {
+    if (!this.element) return;
 
     const camVal = this.element.querySelector('#diag-cam-val');
-    const modelVal = this.element.querySelector('#diag-model-val');
     const diagCam = this.element.querySelector('#diag-camera .diag-icon');
+    const modelVal = this.element.querySelector('#diag-model-val');
     const diagModel = this.element.querySelector('#diag-model .diag-icon');
+    const btnEnableCam = this.element.querySelector('#btn-enable-cam');
+    const btnRetryModel = this.element.querySelector('#btn-retry-model');
     const indicator = this.element.querySelector('#setup-hand-indicator');
 
-    indicator.textContent = '📷 REQUESTING CAMERA PERMISSION...';
-
-    // 1. Initialize Camera
-    const camResult = await Camera.requestCamera();
-    if (camResult.success) {
+    // 1. Camera Diagnostic Row
+    if (this.cameraState === SETUP_STATES.CAMERA.READY) {
       const vid = Camera.getVideo();
-      const resText = vid ? ` (${vid.videoWidth}x${vid.videoHeight})` : '';
+      const resText = vid && vid.videoWidth > 0 ? ` (${vid.videoWidth}×${vid.videoHeight})` : '';
       camVal.textContent = `Ready${resText}`;
       diagCam.textContent = '🟢';
-      btnEnable.textContent = 'WEBCAM CONNECTED';
-    } else {
-      camVal.textContent = camResult.message || 'Error';
+      btnEnableCam.textContent = 'WEBCAM CONNECTED';
+      btnEnableCam.disabled = true;
+    } else if (this.cameraState === SETUP_STATES.CAMERA.INITIALIZING) {
+      camVal.textContent = 'Initializing...';
+      diagCam.textContent = '🟡';
+      btnEnableCam.textContent = 'CONNECTING CAMERA...';
+      btnEnableCam.disabled = true;
+    } else if (this.cameraState === SETUP_STATES.CAMERA.PERMISSION_DENIED) {
+      camVal.textContent = 'Permission Denied';
       diagCam.textContent = '🔴';
-      btnEnable.disabled = false;
-      btnEnable.textContent = 'RETRY CAMERA';
-      indicator.textContent = '❌ CAMERA ERROR: ' + camResult.message;
-      return;
+      btnEnableCam.textContent = 'RETRY CAMERA';
+      btnEnableCam.disabled = false;
+    } else if (this.cameraState === SETUP_STATES.CAMERA.DISCONNECTED) {
+      camVal.textContent = 'Disconnected';
+      diagCam.textContent = '🔴';
+      btnEnableCam.textContent = 'RETRY CAMERA';
+      btnEnableCam.disabled = false;
+    } else {
+      camVal.textContent = 'Pending Permission';
+      diagCam.textContent = '⚪';
+      btnEnableCam.textContent = '📷 ENABLE CAMERA';
+      btnEnableCam.disabled = false;
     }
 
-    // 2. Initialize MediaPipe Model
-    try {
-      modelVal.textContent = 'Loading AI model...';
-      indicator.textContent = '🤖 LOADING MEDIAPIPE MODEL...';
-      await MediaPipe.init();
-      const delegate = MediaPipe.activeDelegate.toUpperCase();
+    // 2. AI Model Diagnostic Row
+    if (this.modelState === SETUP_STATES.MODEL.READY) {
+      const delegate = MediaPipe.activeDelegate ? MediaPipe.activeDelegate.toUpperCase() : 'GPU';
       modelVal.textContent = `Ready (${delegate})`;
       diagModel.textContent = '🟢';
-      indicator.textContent = '👀 HOLD HAND IN FRONT OF CAMERA';
-    } catch (e) {
-      modelVal.textContent = 'Model Load Failed';
+      btnRetryModel.classList.add('hidden');
+      btnRetryModel.style.display = 'none';
+    } else if (this.modelState === SETUP_STATES.MODEL.LOADING) {
+      modelVal.textContent = 'Loading AI model...';
+      diagModel.textContent = '🟡';
+      btnRetryModel.classList.remove('hidden');
+      btnRetryModel.style.display = 'inline-flex';
+      btnRetryModel.textContent = '⏳ LOADING MODEL...';
+      btnRetryModel.disabled = true;
+    } else if (this.modelState === SETUP_STATES.MODEL.LOAD_FAILED) {
+      modelVal.textContent = 'Load Failed';
       diagModel.textContent = '🔴';
-      indicator.textContent = '❌ AI MODEL LOAD FAILED';
-      console.error('[CameraSetupScreen] MediaPipe init error:', e);
-      return;
+      btnRetryModel.classList.remove('hidden');
+      btnRetryModel.style.display = 'inline-flex';
+      btnRetryModel.textContent = '🔄 RETRY AI MODEL';
+      btnRetryModel.disabled = false;
+    } else {
+      modelVal.textContent = 'Not Loaded';
+      diagModel.textContent = '⚪';
+      btnRetryModel.classList.add('hidden');
+      btnRetryModel.style.display = 'none';
     }
 
-    // Start calibration mode and preview rendering loop
-    Calibration.startCalibration();
-    this.startPreviewLoop();
+    // Diagnostics Error Message Banner
+    const errorBox = this.element.querySelector('#setup-error-box');
+    if (errorBox) {
+      if (this.modelState === SETUP_STATES.MODEL.LOAD_FAILED) {
+        errorBox.textContent = `⚠️ AI Model Error: ${this.modelErrorMessage || 'Model initialization failed. Click Retry AI Model.'}`;
+        errorBox.classList.remove('hidden');
+        errorBox.style.display = 'block';
+      } else if (this.cameraState === SETUP_STATES.CAMERA.PERMISSION_DENIED) {
+        errorBox.textContent = '⚠️ Camera permission denied. Please allow camera access in your browser.';
+        errorBox.classList.remove('hidden');
+        errorBox.style.display = 'block';
+      } else if (this.cameraState === SETUP_STATES.CAMERA.UNAVAILABLE) {
+        errorBox.textContent = '⚠️ Camera unavailable or in use by another application. Click Retry Camera.';
+        errorBox.classList.remove('hidden');
+        errorBox.style.display = 'block';
+      } else {
+        errorBox.classList.add('hidden');
+        errorBox.style.display = 'none';
+        errorBox.textContent = '';
+      }
+    }
+
+    // 3. Central Banner Status Text
+    if (this.cameraState !== SETUP_STATES.CAMERA.READY) {
+      if (this.cameraState === SETUP_STATES.CAMERA.INITIALIZING) {
+        indicator.textContent = '📷 REQUESTING CAMERA PERMISSION...';
+      } else if (this.cameraState === SETUP_STATES.CAMERA.PERMISSION_DENIED) {
+        indicator.textContent = '❌ CAMERA PERMISSION DENIED — PLEASE ALLOW IN BROWSER';
+      } else {
+        indicator.textContent = 'WAITING FOR CAMERA PERMISSION';
+      }
+      indicator.className = 'setup-status-overlay status-waiting';
+    } else if (this.modelState === SETUP_STATES.MODEL.LOADING) {
+      indicator.textContent = '🤖 LOADING MEDIAPIPE MODEL...';
+      indicator.className = 'setup-status-overlay status-waiting';
+    } else if (this.modelState === SETUP_STATES.MODEL.LOAD_FAILED) {
+      indicator.textContent = `❌ AI MODEL LOAD FAILED — CLICK RETRY AI MODEL`;
+      indicator.className = 'setup-status-overlay status-waiting';
+    } else if (this.modelState === SETUP_STATES.MODEL.READY) {
+      indicator.textContent = '👀 HOLD HAND IN FRONT OF CAMERA (1.5 - 2.5 FT)';
+      indicator.className = 'setup-status-overlay status-waiting';
+    }
+  }
+
+  updateDiagnosticsRealtime(hasHand, now) {
+    const handVal = this.element.querySelector('#diag-hand-val');
+    const diagHand = this.element.querySelector('#diag-hand .diag-icon');
+    const fpsVal = this.element.querySelector('#diag-fps-val');
+    const diagFps = this.element.querySelector('#diag-fps .diag-icon');
+    const indicator = this.element.querySelector('#setup-hand-indicator');
+    const btnStart = this.element.querySelector('#btn-start-calibrated');
+
+    const bothReady = this.cameraState === SETUP_STATES.CAMERA.READY && this.modelState === SETUP_STATES.MODEL.READY;
+
+    // Inference Engine FPS
+    if (this.modelState === SETUP_STATES.MODEL.LOAD_FAILED) {
+      fpsVal.textContent = 'Error';
+      diagFps.textContent = '🔴';
+    } else if (bothReady) {
+      const fps = MediaPipe.inferenceFps || 0;
+      fpsVal.textContent = `${fps} FPS (${MediaPipe.lastInferenceDurationMs.toFixed(0)}ms)`;
+      diagFps.textContent = fps > 15 ? '🟢' : '🟡';
+    } else {
+      fpsVal.textContent = this.modelState === SETUP_STATES.MODEL.LOADING ? 'Initializing...' : '-- FPS';
+      diagFps.textContent = '⚪';
+    }
+
+    // Hand Tracking State & Tutorial Unlock
+    if (!bothReady) {
+      handVal.textContent = 'Waiting for Camera and Model';
+      diagHand.textContent = '⚪';
+      btnStart.disabled = true;
+    } else {
+      btnStart.disabled = false;
+      if (hasHand) {
+        const gestureName = this.latestClassification ? this.latestClassification.gesture : 'NEUTRAL';
+        handVal.textContent = `Hand Detected (${gestureName})`;
+        diagHand.textContent = '🟢';
+        indicator.textContent = `✅ HAND DETECTED: ${gestureName}`;
+        indicator.className = 'setup-status-overlay status-locked';
+      } else {
+        const recentlyLost = this.lastHandSeenTime > 0 && (now - this.lastHandSeenTime < 1400);
+        if (recentlyLost) {
+          handVal.textContent = 'Tracking Lost';
+          diagHand.textContent = '🟠';
+          indicator.textContent = '⚠️ TRACKING LOST — HOLD HAND IN VIEW';
+          indicator.className = 'setup-status-overlay status-waiting';
+        } else {
+          handVal.textContent = 'No Hand Detected';
+          diagHand.textContent = '⚪';
+          indicator.textContent = '👀 HOLD HAND IN FRONT OF CAMERA (1.5 - 2.5 FT)';
+          indicator.className = 'setup-status-overlay status-waiting';
+        }
+      }
+    }
   }
 
   startPreviewLoop() {
     this.stopPreviewLoop();
 
     const loop = () => {
-      const video = Camera.getVideo();
+      // Render clean points-only futuristic digital display
+      // (Inference is handled autonomously by the decoupled GameLoop scheduler)
       const ctx = this.previewCtx;
       const w = this.previewCanvas.width;
       const h = this.previewCanvas.height;
 
       ctx.clearRect(0, 0, w, h);
 
-      // 1. Clean Light-Theme Sky Canvas (Points-Only Display)
+      // Light-theme Sky background
       ctx.fillStyle = '#FFFFFF';
       ctx.fillRect(0, 0, w, h);
 
@@ -227,7 +456,7 @@ export class CameraSetupScreen {
         ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke();
       }
 
-      // Draw calibration guide lines
+      // Calibration guide lines
       const nx = Calibration.neutralX * w;
       const deadzone = Calibration.deadzoneX * w;
       const jumpY = Calibration.jumpYThreshold * h;
@@ -246,26 +475,8 @@ export class CameraSetupScreen {
       const now = performance.now();
       const hasHand = this.latestHandData && (now - this.lastHandSeenTime < 350);
 
-      const handVal = this.element.querySelector('#diag-hand-val');
-      const diagHand = this.element.querySelector('#diag-hand .diag-icon');
-      const fpsVal = this.element.querySelector('#diag-fps-val');
-      const diagFps = this.element.querySelector('#diag-fps .diag-icon');
-      const indicator = this.element.querySelector('#setup-hand-indicator');
-      const btnStart = this.element.querySelector('#btn-start-calibrated');
-
-      // Update inference stats
-      fpsVal.textContent = `${MediaPipe.inferenceFps} FPS (${MediaPipe.lastInferenceDurationMs.toFixed(0)}ms)`;
-      diagFps.textContent = MediaPipe.inferenceFps > 15 ? '🟢' : '🟡';
-
+      // Render 21 MediaPipe hand landmarks and bone structure
       if (hasHand) {
-        const gestureName = this.latestClassification ? this.latestClassification.gesture : 'NEUTRAL';
-        handVal.textContent = `Tracking Active (${gestureName})`;
-        diagHand.textContent = '🟢';
-        indicator.textContent = `✅ HAND LOCKED: ${gestureName}`;
-        indicator.className = 'setup-status-overlay status-locked';
-        btnStart.disabled = false;
-
-        // Draw skeleton overlay
         const pts = this.latestHandData.points;
         const connections = [
           [0, 1], [1, 2], [2, 3], [3, 4],
@@ -276,6 +487,7 @@ export class CameraSetupScreen {
           [0, 17]
         ];
 
+        // Skeletal bones
         ctx.strokeStyle = '#008BFF';
         ctx.lineWidth = 3;
         ctx.lineCap = 'round';
@@ -287,7 +499,7 @@ export class CameraSetupScreen {
           ctx.stroke();
         });
 
-        // Draw landmark nodes
+        // Landmark joint nodes
         ctx.fillStyle = '#8E7DFF';
         pts.forEach((pt) => {
           ctx.beginPath();
@@ -315,18 +527,15 @@ export class CameraSetupScreen {
           ctx.stroke();
         }
 
-        // Draw palm center
+        // Palm center node
         ctx.fillStyle = '#008BFF';
         ctx.beginPath();
         ctx.arc(this.latestHandData.palmCenter.x * w, this.latestHandData.palmCenter.y * h, 6, 0, Math.PI * 2);
         ctx.fill();
-        } else {
-          handVal.textContent = 'Searching (Keep hand in frame)';
-          diagHand.textContent = '🟡';
-          indicator.textContent = '👀 HOLD HAND IN FRONT OF CAMERA';
-          indicator.className = 'setup-status-overlay status-waiting';
-          btnStart.disabled = true;
-        }
+      }
+
+      // 3. Update real-time text and status indicators
+      this.updateDiagnosticsRealtime(hasHand, now);
 
       this.animId = requestAnimationFrame(loop);
     };
@@ -343,13 +552,16 @@ export class CameraSetupScreen {
 
   show() {
     this.element.classList.remove('hidden');
-    if (Camera.isReady && MediaPipe.isLoaded) {
-      this.element.querySelector('#btn-enable-cam').textContent = 'WEBCAM CONNECTED';
-      this.element.querySelector('#btn-enable-cam').disabled = true;
-      this.element.querySelector('#diag-cam-val').textContent = 'Ready';
-      this.element.querySelector('#diag-camera .diag-icon').textContent = '🟢';
-      this.element.querySelector('#diag-model-val').textContent = `Ready (${MediaPipe.activeDelegate.toUpperCase()})`;
-      this.element.querySelector('#diag-model .diag-icon').textContent = '🟢';
+
+    // Sync live camera and model states
+    this.cameraState = Camera.isReady ? SETUP_STATES.CAMERA.READY : SETUP_STATES.CAMERA.UNAVAILABLE;
+    this.modelState = MediaPipe.isLoaded ? SETUP_STATES.MODEL.READY : (
+      MediaPipe.state === MEDIAPIPE_STATES.ERROR ? SETUP_STATES.MODEL.LOAD_FAILED : SETUP_STATES.MODEL.NOT_LOADED
+    );
+
+    this.updateUI();
+
+    if (Camera.isReady) {
       Calibration.startCalibration();
       this.startPreviewLoop();
     }

@@ -1,6 +1,7 @@
 /**
  * AI Gesture Runner 3D - CollisionSystem
- * 3D AABB intersection tests accounting for dynamic jumping heights and crouching slide profiles.
+ * High-performance 3D AABB intersection testing with spatial pruning
+ * and zero per-frame object allocations.
  */
 
 import { OBSTACLE_TYPES } from './ObstacleManager.js';
@@ -12,6 +13,10 @@ export class CollisionSystem {
     this.controller = playerController;
     this.obstacles = obstacleManager;
     this.powerUps = powerUpManager;
+
+    // Pre-allocated reusable AABB structures (zero per-frame allocations)
+    this.pBox = { minX: 0, maxX: 0, minY: 0, maxY: 0, minZ: 0, maxZ: 0 };
+    this.oBox = { minX: 0, maxX: 0, minY: 0, maxY: 0, minZ: 0, maxZ: 0 };
   }
 
   checkCollisions() {
@@ -24,56 +29,59 @@ export class CollisionSystem {
       return false;
     }
 
-    const pBox = this.controller.getBoundingBox();
-    const activeObs = this.obstacles.getActiveObstacles();
+    this.controller.getBoundingBox(this.pBox);
+    const playerZ = this.controller.position.z;
+    const playerX = this.controller.position.x;
+    const obsList = this.obstacles.obstacles;
 
-    for (const obs of activeObs) {
+    for (let i = 0; i < obsList.length; i++) {
+      const obs = obsList[i];
+      if (!obs.active) continue;
+
       const oPos = obs.mesh.position;
-      let oBox = null;
 
+      // Spatial Early-Out: Only check obstacles within proximity window
+      const dz = Math.abs(oPos.z - playerZ);
+      const isTrain = obs.type === OBSTACLE_TYPES.MOVING_TRAIN;
+      const maxDz = isTrain ? 6.5 : 4.0;
+      if (dz > maxDz) continue;
+
+      const dx = Math.abs(oPos.x - playerX);
+      if (dx > 2.2) continue; // Different railway lane
+
+      // Compute obstacle bounding box in-place
+      const b = this.oBox;
       if (obs.type === OBSTACLE_TYPES.LOW_BARRIER) {
-        // Hurdle width: 2.2, height: 0.85, depth: 0.4
-        oBox = {
-          minX: oPos.x - 1.1,
-          maxX: oPos.x + 1.1,
-          minY: 0,
-          maxY: 0.85,
-          minZ: oPos.z - 0.2,
-          maxZ: oPos.z + 0.2
-        };
+        b.minX = oPos.x - 1.1;
+        b.maxX = oPos.x + 1.1;
+        b.minY = 0;
+        b.maxY = 0.85;
+        b.minZ = oPos.z - 0.2;
+        b.maxZ = oPos.z + 0.2;
       } else if (obs.type === OBSTACLE_TYPES.HIGH_BARRIER) {
-        // Overhead beam: height from 1.15 to 1.8
-        oBox = {
-          minX: oPos.x - 1.2,
-          maxX: oPos.x + 1.2,
-          minY: 1.12,
-          maxY: 1.8,
-          minZ: oPos.z - 0.2,
-          maxZ: oPos.z + 0.2
-        };
+        b.minX = oPos.x - 1.2;
+        b.maxX = oPos.x + 1.2;
+        b.minY = 1.12;
+        b.maxY = 1.8;
+        b.minZ = oPos.z - 0.2;
+        b.maxZ = oPos.z + 0.2;
       } else if (obs.type === OBSTACLE_TYPES.LANE_BLOCKER) {
-        // Full train blocker
-        oBox = {
-          minX: oPos.x - 1.1,
-          maxX: oPos.x + 1.1,
-          minY: 0,
-          maxY: 3.0,
-          minZ: oPos.z - 2.1,
-          maxZ: oPos.z + 2.1
-        };
+        b.minX = oPos.x - 1.1;
+        b.maxX = oPos.x + 1.1;
+        b.minY = 0;
+        b.maxY = 3.0;
+        b.minZ = oPos.z - 2.1;
+        b.maxZ = oPos.z + 2.1;
       } else if (obs.type === OBSTACLE_TYPES.MOVING_TRAIN) {
-        // Heavy oncoming cyber-train
-        oBox = {
-          minX: oPos.x - 1.15,
-          maxX: oPos.x + 1.15,
-          minY: 0,
-          maxY: 3.2,
-          minZ: oPos.z - 3.6,
-          maxZ: oPos.z + 3.6
-        };
+        b.minX = oPos.x - 1.15;
+        b.maxX = oPos.x + 1.15;
+        b.minY = 0;
+        b.maxY = 3.2;
+        b.minZ = oPos.z - 3.6;
+        b.maxZ = oPos.z + 3.6;
       }
 
-      if (oBox && this.intersectAABB(pBox, oBox)) {
+      if (this.intersectAABB(this.pBox, b)) {
         this.handleCollision(obs);
         return true;
       }

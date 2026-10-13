@@ -150,6 +150,33 @@
 .badge-pause { color: var(--purple-accent); }
 .badge-lost { color: var(--accent-orange); }
 
+.hud-tracking-alert {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1.5px solid var(--accent-orange);
+  color: var(--accent-orange);
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 2px 8px rgba(255, 122, 92, 0.25);
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  z-index: 5;
+  animation: pulse-mini-alert 1.5s infinite alternate ease-in-out;
+}
+
+.hud-tracking-alert.hidden {
+  display: none;
+}
+
+@keyframes pulse-mini-alert {
+  from { transform: scale(0.96); opacity: 0.9; }
+  to { transform: scale(1.02); opacity: 1; }
+}
+
 /* Bottom Left Gesture Reaction Feedback */
 .hud-gesture-feedback {
   position: absolute;
@@ -616,6 +643,24 @@
 .gesture-icon {
   font-size: 2.2rem;
   margin-bottom: 8px;
+}
+
+.resume-icon-img {
+  height: 1em;
+  width: auto;
+  max-height: 1em;
+  display: inline-block;
+  vertical-align: middle;
+  object-fit: contain;
+}
+
+.resume-icon-inline {
+  height: 1.15em;
+  width: auto;
+  max-height: 1.15em;
+  display: inline-block;
+  vertical-align: -0.18em;
+  object-fit: contain;
 }
 
 .gesture-title {

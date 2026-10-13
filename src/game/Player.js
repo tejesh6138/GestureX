@@ -452,12 +452,9 @@ export class Player {
     this.rightKnee.add(this.rightAnkle);
     this.buildHighTopSneaker(this.rightAnkle);
 
-    // Shadows across the entire character mesh
-    this.mesh.traverse((obj) => {
-      if (obj.isMesh) {
-        obj.castShadow = true;
-        obj.receiveShadow = true;
-      }
+    // Shadow optimization: only primary silhouette meshes cast shadow (saves ~35 shadow draw calls per frame)
+    [jacketMesh, headMesh, packBody, leftThighMesh, rightThighMesh, leftShinMesh, rightShinMesh].forEach((m) => {
+      if (m) m.castShadow = true;
     });
   }
 

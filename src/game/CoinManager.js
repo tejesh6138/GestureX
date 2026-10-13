@@ -129,7 +129,12 @@ export class CoinManager {
     const obstacles = this.obstacleManager.getActiveObstacles();
     for (const obs of obstacles) {
       const p = obs.mesh.position;
-      if (Math.abs(p.x - laneX) < 1.1 && Math.abs(p.z - z) < radius) {
+      let effectiveRadius = radius;
+      if (obs.type === OBSTACLE_TYPES.MOVING_TRAIN) effectiveRadius = 5.2;
+      else if (obs.type === OBSTACLE_TYPES.LANE_BLOCKER) effectiveRadius = 3.4;
+      else if (obs.type === OBSTACLE_TYPES.LOW_BARRIER) effectiveRadius = 1.8;
+
+      if (Math.abs(p.x - laneX) < 1.2 && Math.abs(p.z - z) < effectiveRadius) {
         return true;
       }
     }
@@ -260,45 +265,49 @@ export class CoinManager {
 
     const rotSpeed = GAME_CONFIG.COINS.ROTATION_SPEED || 4.2;
     const collectRadius = GAME_CONFIG.COINS.COLLECTION_RADIUS || 1.35;
+    const collectRadiusSq = collectRadius * collectRadius;
+    const magnetRadius = GAME_CONFIG.POWER_UPS.MAGNET_RADIUS;
+    const magnetRadiusSq = magnetRadius * magnetRadius;
+    const targetY = playerPos.y + 0.8;
 
     // 2. Continuous rotation & magnet pull physics
     for (let i = this.coins.length - 1; i >= 0; i--) {
       const c = this.coins[i];
       if (!c.active || c.collected) continue;
 
-      c.mesh.rotation.y += dt * rotSpeed;
+      const cPos = c.mesh.position;
+      const dz = cPos.z - playerPos.z;
 
-      // Magnet pull physics
-      if (hasMagnet) {
-        const distToPlayer = MathUtils.distance3D(
-          playerPos.x, playerPos.y + 0.8, playerPos.z,
-          c.mesh.position.x, c.mesh.position.y, c.mesh.position.z
-        );
-
-        if (distToPlayer < GAME_CONFIG.POWER_UPS.MAGNET_RADIUS) {
-          const pullSpeed = GAME_CONFIG.POWER_UPS.MAGNET_PULL_SPEED * dt;
-          c.mesh.position.x = MathUtils.lerp(c.mesh.position.x, playerPos.x, pullSpeed * 0.45);
-          c.mesh.position.y = MathUtils.lerp(c.mesh.position.y, playerPos.y + 0.8, pullSpeed * 0.45);
-          c.mesh.position.z = MathUtils.lerp(c.mesh.position.z, playerPos.z, pullSpeed * 0.55);
-        }
+      // Recycle if passed behind player
+      if (dz > 12) {
+        c.active = false;
+        c.mesh.visible = false;
+        this.coins.splice(i, 1);
+        continue;
       }
 
-      // Exact collision detection with player
-      const collectDist = MathUtils.distance3D(
-        playerPos.x, playerPos.y + 0.8, playerPos.z,
-        c.mesh.position.x, c.mesh.position.y, c.mesh.position.z
-      );
+      c.mesh.rotation.y += dt * rotSpeed;
 
-      if (collectDist < collectRadius) {
+      // Proximity check: skip detailed distance math if far away
+      const maxCheckDist = hasMagnet ? magnetRadius : 3.0;
+      if (Math.abs(dz) > maxCheckDist) continue;
+
+      const dx = playerPos.x - cPos.x;
+      const dy = targetY - cPos.y;
+      const distSq = dx * dx + dy * dy + dz * dz;
+
+      // Exact collision detection with player
+      if (distSq < collectRadiusSq) {
         this.collectCoin(c, i);
         continue;
       }
 
-      // Recycle if passed behind player
-      if (c.mesh.position.z > playerPos.z + 12) {
-        c.active = false;
-        c.mesh.visible = false;
-        this.coins.splice(i, 1);
+      // Magnet pull physics
+      if (hasMagnet && distSq < magnetRadiusSq) {
+        const pullSpeed = GAME_CONFIG.POWER_UPS.MAGNET_PULL_SPEED * dt;
+        cPos.x = MathUtils.lerp(cPos.x, playerPos.x, pullSpeed * 0.45);
+        cPos.y = MathUtils.lerp(cPos.y, targetY, pullSpeed * 0.45);
+        cPos.z = MathUtils.lerp(cPos.z, playerPos.z, pullSpeed * 0.55);
       }
     }
 

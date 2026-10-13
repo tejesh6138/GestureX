@@ -80,7 +80,7 @@ export class TutorialScreen {
 
           <!-- Card 6: Resume (3 Fingers) -->
           <div class="gesture-card" id="card-RESUME">
-            <div class="gesture-icon">🤟</div>
+            <div class="gesture-icon"><img src="./icons/gesture-resume.png" class="resume-icon-img" alt="Resume (3 Fingers)"></div>
             <div class="gesture-title">THREE-FINGER RESUME</div>
             <div class="gesture-desc">Extend your <strong>index, middle, and ring fingers</strong> upward (pinky folded) while paused to resume the game.</div>
             <div class="gesture-status">Pending Test</div>
@@ -142,9 +142,27 @@ export class TutorialScreen {
       }
     });
 
+    GlobalEvents.on(EVENTS.GESTURE_RAW_DATA, ({ handData, classification }) => {
+      if (this.element && !this.element.classList.contains('hidden') && this.liveFeedbackTag) {
+        if (!handData) {
+          this.liveFeedbackTag.textContent = 'SEARCHING FOR HAND...';
+        } else if (classification) {
+          let label = classification.gesture;
+          if (label === 'PAUSE' || label === 'HOLDING_PAUSE') label = '✋ PAUSE (HOLD)';
+          else if (label === 'RESUME' || label === 'HOLDING_RESUME') label = 'RESUME (3-FINGER)';
+          else if (label === 'SLIDE') label = '✊ SLIDE';
+          else if (label === 'JUMP') label = '✌️ JUMP';
+          else if (label === 'MOVE_LEFT') label = '👈 LEFT';
+          else if (label === 'MOVE_RIGHT') label = '👉 RIGHT';
+          else if (label === 'NEUTRAL') label = '🟢 HAND READY';
+          this.liveFeedbackTag.textContent = label;
+        }
+      }
+    });
+
     GlobalEvents.on(EVENTS.TRACKING_LOST, () => {
       if (this.element && !this.element.classList.contains('hidden') && this.liveFeedbackTag) {
-        this.liveFeedbackTag.textContent = 'TRACKING LOST';
+        this.liveFeedbackTag.textContent = '⚠️ TRACKING LOST';
       }
     });
   }

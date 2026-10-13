@@ -9,6 +9,7 @@ export class StorageService {
   constructor() {
     this.prefix = ENVIRONMENT.STORAGE_KEY_PREFIX;
     this.schemaVersion = 1;
+    this.memoryStore = new Map();
     this.initSchema();
   }
 
@@ -18,54 +19,70 @@ export class StorageService {
 
   initSchema() {
     try {
-      const storedVer = localStorage.getItem(this.getKey('SCHEMA_VER'));
-      if (!storedVer) {
-        localStorage.setItem(this.getKey('SCHEMA_VER'), String(this.schemaVersion));
+      if (typeof localStorage !== 'undefined') {
+        const storedVer = localStorage.getItem(this.getKey('SCHEMA_VER'));
+        if (!storedVer) {
+          localStorage.setItem(this.getKey('SCHEMA_VER'), String(this.schemaVersion));
+        }
       }
     } catch (e) {
-      console.warn('[StorageService] LocalStorage not available or restricted:', e);
+      console.warn('[StorageService] LocalStorage not available or restricted, using in-memory store:', e);
     }
   }
 
   getItem(key, defaultValue = null) {
     try {
-      const raw = localStorage.getItem(this.getKey(key));
-      if (raw === null || raw === undefined) return defaultValue;
-      return JSON.parse(raw);
+      if (typeof localStorage !== 'undefined') {
+        const raw = localStorage.getItem(this.getKey(key));
+        if (raw === null || raw === undefined) {
+          return this.memoryStore.has(key) ? this.memoryStore.get(key) : defaultValue;
+        }
+        return JSON.parse(raw);
+      }
     } catch (e) {
-      console.error(`[StorageService] Failed to read key "${key}":`, e);
-      return defaultValue;
+      return this.memoryStore.has(key) ? this.memoryStore.get(key) : defaultValue;
     }
+    return this.memoryStore.has(key) ? this.memoryStore.get(key) : defaultValue;
   }
 
   setItem(key, value) {
+    this.memoryStore.set(key, value);
     try {
-      localStorage.setItem(this.getKey(key), JSON.stringify(value));
-      return true;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(this.getKey(key), JSON.stringify(value));
+        return true;
+      }
     } catch (e) {
-      console.error(`[StorageService] Failed to write key "${key}":`, e);
-      return false;
+      console.warn(`[StorageService] LocalStorage write failed for "${key}", kept in memory:`, e);
+      return true;
     }
+    return true;
   }
 
   removeItem(key) {
+    this.memoryStore.delete(key);
     try {
-      localStorage.removeItem(this.getKey(key));
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(this.getKey(key));
+      }
     } catch (e) {
-      console.error(`[StorageService] Failed to remove key "${key}":`, e);
+      console.warn(`[StorageService] LocalStorage remove failed for "${key}":`, e);
     }
   }
 
   clearAllGameData() {
+    this.memoryStore.clear();
     try {
-      const toRemove = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith(this.prefix)) {
-          toRemove.push(k);
+      if (typeof localStorage !== 'undefined') {
+        const toRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith(this.prefix)) {
+            toRemove.push(k);
+          }
         }
+        toRemove.forEach((k) => localStorage.removeItem(k));
       }
-      toRemove.forEach((k) => localStorage.removeItem(k));
     } catch (e) {
       console.error('[StorageService] Clear failed:', e);
     }

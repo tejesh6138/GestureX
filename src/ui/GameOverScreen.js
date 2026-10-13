@@ -236,5 +236,9 @@ export class GameOverScreen {
 
   hide() {
     this.element.classList.add('hidden');
+    const scoreBanner = this.element.querySelector('#new-high-score-banner');
+    if (scoreBanner) scoreBanner.classList.add('hidden');
+    const coinBanner = this.element.querySelector('#new-coin-record-banner');
+    if (coinBanner) coinBanner.classList.add('hidden');
   }
 }

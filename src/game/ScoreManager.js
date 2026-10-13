@@ -18,6 +18,10 @@ export class ScoreManager {
     this.runStartTime = 0;
     this.isRunActive = false;
 
+    this.lastEmittedScoreFloor = -1;
+    this.lastEmittedDistanceFloor = -1;
+    this.lastEmitTime = 0;
+
     this.bindEvents();
   }
 
@@ -25,6 +29,7 @@ export class ScoreManager {
     GlobalEvents.on(EVENTS.COIN_COLLECTED, () => {
       this.currentRunCoins += 1;
       this.score += GAME_CONFIG.SCORING.POINTS_PER_COIN;
+      this.lastEmittedScoreFloor = Math.floor(this.score);
       GlobalEvents.emit(EVENTS.SCORE_UPDATED, {
         score: this.score,
         coins: this.currentRunCoins,
@@ -46,12 +51,16 @@ export class ScoreManager {
     this.highestSpeed = GAME_CONFIG.PLAYER.INITIAL_SPEED;
     this.runStartTime = performance.now();
     this.isRunActive = true;
+    this.lastEmittedScoreFloor = 0;
+    this.lastEmittedDistanceFloor = 0;
+    this.lastEmitTime = performance.now();
 
     GlobalEvents.emit(EVENTS.SCORE_UPDATED, {
       score: this.score,
       coins: this.currentRunCoins,
       distance: this.distance
     });
+    GlobalEvents.emit(EVENTS.DISTANCE_UPDATED, { distance: this.distance });
   }
 
   update(currentDistance) {
@@ -61,12 +70,28 @@ export class ScoreManager {
     this.score = this.distance * GAME_CONFIG.SCORING.POINTS_PER_METER +
                  this.currentRunCoins * GAME_CONFIG.SCORING.POINTS_PER_COIN;
 
-    GlobalEvents.emit(EVENTS.DISTANCE_UPDATED, { distance: this.distance });
-    GlobalEvents.emit(EVENTS.SCORE_UPDATED, {
-      score: this.score,
-      coins: this.currentRunCoins,
-      distance: this.distance
-    });
+    const distFloor = Math.floor(this.distance);
+    const scoreFloor = Math.floor(this.score);
+    const now = performance.now();
+
+    const distChanged = distFloor !== this.lastEmittedDistanceFloor;
+    const scoreChanged = scoreFloor !== this.lastEmittedScoreFloor;
+    const timeToEmit = (now - this.lastEmitTime) > 80;
+
+    if (distChanged) {
+      this.lastEmittedDistanceFloor = distFloor;
+      GlobalEvents.emit(EVENTS.DISTANCE_UPDATED, { distance: this.distance });
+    }
+
+    if (scoreChanged || timeToEmit) {
+      this.lastEmittedScoreFloor = scoreFloor;
+      this.lastEmitTime = now;
+      GlobalEvents.emit(EVENTS.SCORE_UPDATED, {
+        score: this.score,
+        coins: this.currentRunCoins,
+        distance: this.distance
+      });
+    }
   }
 
   finalizeRun(difficulty = 'MEDIUM') {
@@ -124,5 +149,8 @@ export class ScoreManager {
     this.currentRunCoins = 0;
     this.highestSpeed = GAME_CONFIG.PLAYER.INITIAL_SPEED;
     this.isRunActive = false;
+    this.lastEmittedScoreFloor = -1;
+    this.lastEmittedDistanceFloor = -1;
+    this.lastEmitTime = 0;
   }
 }

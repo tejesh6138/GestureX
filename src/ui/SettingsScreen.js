@@ -52,6 +52,7 @@ export class SettingsScreen {
             </div>
             <div class="setting-ctrl">
               <select id="set-graphics" class="select-input">
+                <option value="auto" ${current.graphicsQuality === 'auto' || !current.graphicsQuality ? 'selected' : ''}>Auto (Adaptive 60–120 FPS)</option>
                 <option value="high" ${current.graphicsQuality === 'high' ? 'selected' : ''}>High (Full Cyber Bloom)</option>
                 <option value="medium" ${current.graphicsQuality === 'medium' ? 'selected' : ''}>Medium (Balanced)</option>
                 <option value="low" ${current.graphicsQuality === 'low' ? 'selected' : ''}>Low (Battery Saver)</option>

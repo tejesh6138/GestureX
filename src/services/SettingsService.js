@@ -10,7 +10,7 @@ import { Sound } from './SoundService.js';
 export class SettingsService {
   constructor() {
     this.defaultSettings = {
-      graphicsQuality: 'high',   // 'high', 'medium', 'low'
+      graphicsQuality: 'auto',   // 'auto', 'high', 'medium', 'low'
       bgmVolume: 0.45,
       sfxVolume: 0.7,
       isMuted: false,
