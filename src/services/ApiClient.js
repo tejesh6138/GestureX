@@ -19,6 +19,19 @@ function generateUUID() {
   });
 }
 
+function extractErrorMessage(data, fallback = 'Request failed') {
+  if (!data) return fallback;
+  if (typeof data === 'string') return data;
+  if (data.detail && typeof data.detail === 'string') return data.detail;
+  if (data.message && typeof data.message === 'string') return data.message;
+  const firstVal = Object.values(data)[0];
+  if (Array.isArray(firstVal) && firstVal.length > 0) {
+    return String(firstVal[0]);
+  }
+  if (typeof firstVal === 'string') return firstVal;
+  return fallback;
+}
+
 export class ApiClientClass {
   constructor() {
     this.baseUrl = ENVIRONMENT.API.BASE_URL.replace(/\/$/, '');
@@ -106,7 +119,7 @@ export class ApiClientClass {
         ok: response.ok,
         status: response.status,
         data,
-        error: !response.ok ? (data.detail || data.message || Object.values(data)[0] || 'Request failed') : null
+        error: !response.ok ? extractErrorMessage(data) : null
       };
     } catch (err) {
       return {

@@ -10,6 +10,7 @@ import { ApiClient } from '../services/ApiClient.js';
 import { AuthService } from '../services/AuthService.js';
 import { Sound } from '../services/SoundService.js';
 import { MathUtils } from '../utils/MathUtils.js';
+import { GlobalEvents } from '../core/EventBus.js';
 
 export class ResultsScreen {
   constructor(container, onAction) {
@@ -345,8 +346,15 @@ export class ResultsScreen {
         }
       } catch {}
     } else {
-      notice.innerHTML = '👤 Guest Mode: Running in local browser storage. Log in to claim your global rank.';
+      notice.innerHTML = '👤 Guest Mode: Running in local browser storage. <a href="#" id="link-results-guest-login" style="color:var(--primary-blue);text-decoration:underline;cursor:pointer;">Log in</a> to claim your global rank.';
       notice.style.color = 'var(--text-secondary)';
+      const link = notice.querySelector('#link-results-guest-login');
+      if (link) {
+        link.onclick = (e) => {
+          e.preventDefault();
+          GlobalEvents.emit('OPEN_AUTH_MODAL', { view: 'LOGIN' });
+        };
+      }
     }
 
     // Populate Achievements

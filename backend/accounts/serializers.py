@@ -1,3 +1,5 @@
+from datetime import timedelta
+from django.utils import timezone
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
@@ -45,30 +47,44 @@ class RegisterSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=8)
 
-    def validate_username(self, value):
-        val = value.strip()
-        if User.objects.filter(username__iexact=val).exists():
-            raise serializers.ValidationError("A runner with this username already exists.")
-        return val
-
-    def validate_email(self, value):
-        val = value.strip().lower()
-        if User.objects.filter(email__iexact=val, is_email_verified=True).exists():
-            raise serializers.ValidationError("An account with this email address already exists.")
-        return val
-
     def validate_password(self, value):
         validate_password(value)
         return value
 
-    def create(self, validated_data):
-        email = validated_data['email'].lower()
-        username = validated_data['username']
+    def validate(self, attrs):
+        username = attrs.get('username', '').strip()
+        email = attrs.get('email', '').strip().lower()
 
-        # If an unverified user with this email or username already exists, delete or re-use
+        # 1. Verified account check: cannot use an already verified username or email
+        if User.objects.filter(username__iexact=username, is_email_verified=True).exists():
+            raise serializers.ValidationError({"username": "A runner with this username already exists."})
+
+        if User.objects.filter(email__iexact=email, is_email_verified=True).exists():
+            raise serializers.ValidationError({"email": "An account with this email address already exists."})
+
+        # 2. Check if an unverified user exists with this username under a different email
+        unverified_username_owner = User.objects.filter(username__iexact=username, is_email_verified=False).first()
+        if unverified_username_owner and unverified_username_owner.email.lower() != email:
+            # If the other unverified registration is stale (older than 1 hour), purge it so the name can be used
+            if unverified_username_owner.date_joined < timezone.now() - timedelta(hours=1):
+                unverified_username_owner.delete()
+            else:
+                raise serializers.ValidationError({"username": "A runner with this username already exists."})
+
+        return attrs
+
+    def create(self, validated_data):
+        email = validated_data['email'].strip().lower()
+        username = validated_data['username'].strip()
+
+        # If an unverified user with this email or username already exists, update and re-use
         existing_user = User.objects.filter(email__iexact=email, is_email_verified=False).first()
+        if not existing_user:
+            existing_user = User.objects.filter(username__iexact=username, is_email_verified=False).first()
+
         if existing_user:
             existing_user.username = username
+            existing_user.email = email
             existing_user.set_password(validated_data['password'])
             existing_user.is_active = False
             existing_user.save()

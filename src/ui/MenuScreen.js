@@ -138,6 +138,10 @@ export class MenuScreen {
         }).catch(() => {});
       }
     });
+
+    GlobalEvents.on('OPEN_AUTH_MODAL', ({ view } = {}) => {
+      this.authModal.show(view || 'LOGIN');
+    });
   }
 
   updateAccountStatus() {

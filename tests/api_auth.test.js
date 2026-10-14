@@ -70,6 +70,7 @@ globalThis.fetch = async (url, options = {}) => {
 import { ApiClient } from '../src/services/ApiClient.js';
 import { AuthService } from '../src/services/AuthService.js';
 import { Storage } from '../src/services/StorageService.js';
+import { Score } from '../src/services/ScoreService.js';
 
 describe('8. Frontend API Client & Auth Integration', () => {
   beforeEach(() => {
@@ -140,5 +141,19 @@ describe('8. Frontend API Client & Auth Integration', () => {
     await AuthService.logout();
     assert.strictEqual(AuthService.isLoggedIn(), false);
     assert.strictEqual(AuthService.isGuestMode(), true);
+  });
+
+  test('ScoreService tracks and returns lastSubmitPromise', () => {
+    const runResult = {
+      score: 1200,
+      coinsCollected: 35,
+      distanceTravelled: 280,
+      durationSeconds: 32,
+      difficulty: 'MEDIUM'
+    };
+    Score.saveRun(runResult);
+    const promise = Score.getLastSubmitPromise();
+    assert.ok(promise);
+    assert.strictEqual(typeof promise.then, 'function');
   });
 });

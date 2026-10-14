@@ -8,6 +8,8 @@
 import { Sound } from '../services/SoundService.js';
 import { MathUtils } from '../utils/MathUtils.js';
 import { AuthService } from '../services/AuthService.js';
+import { Score } from '../services/ScoreService.js';
+import { GlobalEvents } from '../core/EventBus.js';
 
 export class GameOverScreen {
   constructor(container, onAction) {
@@ -176,11 +178,37 @@ export class GameOverScreen {
     const cloudStatusEl = this.element.querySelector('#game-over-cloud-status');
     if (cloudStatusEl) {
       if (AuthService.isLoggedIn()) {
-        cloudStatusEl.className = 'cloud-sync-status sync-saved';
-        cloudStatusEl.textContent = '☁️ Synchronized to Neon Cloud';
+        cloudStatusEl.className = 'cloud-sync-status sync-pending';
+        cloudStatusEl.textContent = '⚡ Saving to Neon Cloud...';
+
+        const submitPromise = Score.getLastSubmitPromise();
+        if (submitPromise) {
+          submitPromise.then((res) => {
+            if (res && res.savedToCloud) {
+              cloudStatusEl.className = 'cloud-sync-status sync-saved';
+              cloudStatusEl.textContent = '☁️ Saved to Neon Cloud';
+            } else if (res && res.offline) {
+              cloudStatusEl.className = 'cloud-sync-status sync-pending';
+              cloudStatusEl.textContent = '💾 Saved Locally (Offline • Queued for Cloud Sync)';
+            } else {
+              cloudStatusEl.className = 'cloud-sync-status sync-pending';
+              cloudStatusEl.textContent = '💾 Saved Locally (Cloud Unavailable)';
+            }
+          }).catch(() => {
+            cloudStatusEl.className = 'cloud-sync-status sync-pending';
+            cloudStatusEl.textContent = '💾 Saved Locally (Sync Error)';
+          });
+        }
       } else {
         cloudStatusEl.className = 'cloud-sync-status sync-local';
-        cloudStatusEl.textContent = '💾 Saved Locally (Guest Mode • Login for Global Leaderboard)';
+        cloudStatusEl.innerHTML = '💾 Saved Locally (Guest Mode • <a href="#" id="link-guest-login" style="color:var(--primary-blue);text-decoration:underline;cursor:pointer;">Login to rank globally</a>)';
+        const link = cloudStatusEl.querySelector('#link-guest-login');
+        if (link) {
+          link.onclick = (e) => {
+            e.preventDefault();
+            GlobalEvents.emit('OPEN_AUTH_MODAL', { view: 'LOGIN' });
+          };
+        }
       }
     }
 

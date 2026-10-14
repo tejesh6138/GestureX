@@ -6,6 +6,7 @@ and SMTP Email OTP Delivery.
 """
 
 import os
+import sys
 from pathlib import Path
 from datetime import timedelta
 import dj_database_url
@@ -24,7 +25,7 @@ SECRET_KEY = os.getenv(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DJANGO_DEBUG', 'False').lower() in ('true', '1', 'yes')
+DEBUG = os.getenv('DJANGO_DEBUG', 'True' if not os.getenv('RENDER') else 'False').lower() in ('true', '1', 'yes')
 
 ALLOWED_HOSTS = [
     host.strip()
@@ -90,7 +91,7 @@ ASGI_APPLICATION = 'gesturex_backend.asgi.application'
 # Database Configuration: Neon PostgreSQL with resilient pooling and SSL
 # If DATABASE_URL is provided, configure Neon PostgreSQL
 DATABASE_URL = os.getenv('DATABASE_URL')
-if DATABASE_URL:
+if DATABASE_URL and 'test' not in sys.argv:
     DATABASES = {
         'default': dj_database_url.config(
             default=DATABASE_URL,
@@ -104,11 +105,11 @@ if DATABASE_URL:
         DATABASES['default'].setdefault('OPTIONS', {})
         DATABASES['default']['OPTIONS']['sslmode'] = 'require'
 else:
-    # Safe offline / unit-testing fallback
+    # Safe offline / unit-testing fallback (avoids Neon PgBouncer CREATE DATABASE failure during tests)
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
+            'NAME': ':memory:' if 'test' in sys.argv else BASE_DIR / 'db.sqlite3',
         }
     }
 
@@ -141,6 +142,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+os.makedirs(STATIC_ROOT, exist_ok=True)
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -216,8 +218,8 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 # SMTP Email Configuration for Real Email OTP Delivery
-EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
-EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '').strip()
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '').replace(' ', '').strip()
 
 if EMAIL_HOST_USER and EMAIL_HOST_PASSWORD and not (os.getenv('USE_CONSOLE_EMAIL', 'False').lower() in ('true', '1')):
     EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -232,7 +234,7 @@ else:
 
 DEFAULT_FROM_EMAIL = os.getenv(
     'DEFAULT_FROM_EMAIL',
-    'GestureX Security <noreply@gesturex.com>'
+    f"GestureX Security <{EMAIL_HOST_USER}>" if EMAIL_HOST_USER else 'GestureX Security <noreply@gesturex.com>'
 )
 
 # OTP Expiry Settings

@@ -107,7 +107,11 @@ export class ScoreService {
     Storage.setItem('RUN_HISTORY', this.runHistory);
 
     // 8. Attempt remote sync if DRF backend is configured
-    ApiClient.submitScore(formattedResult).catch(() => {});
+    this.lastSubmitPromise = ApiClient.submitScore(formattedResult).catch((err) => ({
+      ok: false,
+      offline: true,
+      error: err?.message || 'Sync error'
+    }));
 
     return {
       isNewHighScore,
@@ -117,6 +121,10 @@ export class ScoreService {
       totalCoins: this.totalCoins,
       runResult: formattedResult
     };
+  }
+
+  getLastSubmitPromise() {
+    return this.lastSubmitPromise;
   }
 
   getPersonalBest() {

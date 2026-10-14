@@ -334,6 +334,10 @@ export class Game {
   // ================= GAMEPLAY LIFECYCLE =================
 
   startCountdown() {
+    if (this.countdownInterval) {
+      clearInterval(this.countdownInterval);
+      this.countdownInterval = null;
+    }
     this.resetGameplay();
     this.menuScreen.hide();
     this.hud.updateDifficulty(this.difficultyManager.getMode());
@@ -345,7 +349,7 @@ export class Game {
     this.countdownEl.classList.remove('hidden');
     Sound.playClick();
 
-    const interval = setInterval(() => {
+    this.countdownInterval = setInterval(() => {
       count--;
       if (count > 0) {
         this.countdownEl.textContent = count;
@@ -354,7 +358,8 @@ export class Game {
         this.countdownEl.textContent = 'GO!';
         Sound.playPowerup();
       } else {
-        clearInterval(interval);
+        clearInterval(this.countdownInterval);
+        this.countdownInterval = null;
         this.countdownEl.classList.add('hidden');
         this.stateMachine.transition(GAME_STATES.RUNNING);
         this.scoreManager.startRun();
@@ -375,6 +380,11 @@ export class Game {
     if (this.stateMachine.getState() !== GAME_STATES.PAUSED) return;
     this.pauseScreen.hide();
 
+    if (this.countdownInterval) {
+      clearInterval(this.countdownInterval);
+      this.countdownInterval = null;
+    }
+
     // Safely restore grounded state if paused during a jump so character is not left airborne
     if (this.playerController.position.y > 0 || this.playerController.state === 'JUMPING') {
       this.playerController.ensureGrounded();
@@ -388,7 +398,7 @@ export class Game {
     this.countdownEl.classList.remove('hidden');
     Sound.playClick();
 
-    const interval = setInterval(() => {
+    this.countdownInterval = setInterval(() => {
       count--;
       if (count > 0) {
         this.countdownEl.textContent = count;
@@ -397,7 +407,8 @@ export class Game {
         this.countdownEl.textContent = 'GO!';
         Sound.playPowerup();
       } else {
-        clearInterval(interval);
+        clearInterval(this.countdownInterval);
+        this.countdownInterval = null;
         this.countdownEl.classList.add('hidden');
         this.player.animator.resume();
         this.stateMachine.transition(GAME_STATES.RUNNING);
@@ -415,6 +426,11 @@ export class Game {
   }
 
   resetGameplay() {
+    if (this.countdownInterval) {
+      clearInterval(this.countdownInterval);
+      this.countdownInterval = null;
+    }
+    this.countdownEl.classList.add('hidden');
     this.playerController.reset();
     this.player.animator.reset();
     this.player.invulnerableTimer = 0;
