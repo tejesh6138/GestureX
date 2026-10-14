@@ -14,6 +14,7 @@
 
 import * as THREE from 'three';
 import { PlayerAnimationController, ANIM_STATES } from './PlayerAnimationController.js';
+import { Assets } from '../utils/AssetLoader.js';
 
 export class Player {
   constructor(scene) {
@@ -31,17 +32,17 @@ export class Player {
   }
 
   initMaterials() {
-    // Streetwear Color Palette matching the visual reference sheet
+    // Streetwear Color Palette matching the visual reference sheet with Ultra-HD textures
     this.hoodRedMat = new THREE.MeshStandardMaterial({
-      color: 0xE53935, // Vibrant hoodie red
-      roughness: 0.45,
+      map: Assets.getPlayerHoodieTexture(),
+      roughness: 0.40,
       metalness: 0.05
     });
 
     this.jacketBlackMat = new THREE.MeshStandardMaterial({
       color: 0x1A1D20, // Matte black jacket
-      roughness: 0.55,
-      metalness: 0.15
+      roughness: 0.50,
+      metalness: 0.18
     });
 
     this.shirtWhiteMat = new THREE.MeshStandardMaterial({
@@ -103,8 +104,8 @@ export class Player {
     });
 
     this.sneakerWhiteMat = new THREE.MeshStandardMaterial({
-      color: 0xFFFFFF, // White rubber midsole & toe cap
-      roughness: 0.3,
+      map: Assets.getSneakerSoleTexture(),
+      roughness: 0.28,
       metalness: 0.05
     });
 

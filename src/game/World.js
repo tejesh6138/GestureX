@@ -1,40 +1,49 @@
 /**
  * AI Gesture Runner 3D - World
- * High-Performance Daylight Sky City Scene Controller:
- * - Dynamic adaptive rendering quality (HIGH / BALANCED / PERFORMANCE).
- * - O(1) circular building & cloud recycling (zero O(N^2) loops).
- * - Frustum-aware shadow culling for distant architecture.
- * - Hardware-calibrated DPR limits for mobile and laptop thermal safety.
- * - Optimized speed slipstreams and dust particles.
+ * Ultra-HD Daylight Sky City Scene Controller:
+ * - High-resolution rendering targeting 1080p Full HD minimum up to 3840x2160 (4K).
+ * - Calibrated sRGB color space, ACES filmic tone mapping, and PCF soft shadow maps.
+ * - Procedural architectural high-rise facades with realistic window reflections and roof crowns.
+ * - Circular O(1) recycling of architecture and volumetric clouds without popping.
+ * - Dynamic adaptive rendering quality controller with hysteresis.
  */
 
 import * as THREE from 'three';
-import { AssetLoader } from '../utils/AssetLoader.js';
+import { Assets } from '../utils/AssetLoader.js';
 import { MathUtils } from '../utils/MathUtils.js';
 
 export class World {
   constructor(canvas) {
     this.canvas = canvas;
     this.scene = new THREE.Scene();
-    this.assetLoader = new AssetLoader();
     this.qualityTier = 'HIGH';
 
-    // Bright Futuristic Sky City: Radiant sky blue background with gentle atmospheric perspective
+    // Radiant Sky City Atmosphere: crisp sky blue with subtle horizon depth
     const skyColor = new THREE.Color(0xbfe7ff);
     this.scene.background = skyColor;
-    this.scene.fog = new THREE.Fog(skyColor, 65, 260);
+    this.scene.fog = new THREE.Fog(skyColor, 75, 290);
 
-    // Renderer setup with high-performance WebGL profile
+    // Renderer setup with Ultra-HD WebGL profile
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
       antialias: true,
-      powerPreference: 'high-performance'
+      powerPreference: 'high-performance',
+      stencil: false,
+      depth: true
     });
-    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
+
+    // Explicit Modern Three.js Color Space & Tone Mapping
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.12;
+
+    // High-Fidelity Soft Shadows
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    // Calibrate maximum supported anisotropic filtering from GPU hardware
+    const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
+    Assets.setMaxAnisotropy(maxAniso);
 
     this.setupLighting();
     this.setupSkyCity();
@@ -46,72 +55,69 @@ export class World {
   }
 
   setupLighting() {
-    // 1. Warm daylight ambient light
-    this.ambientLight = new THREE.AmbientLight(0xffffff, 1.15);
+    // 1. Warm daylight ambient light for natural diffuse fill
+    this.ambientLight = new THREE.AmbientLight(0xffffff, 1.1);
     this.scene.add(this.ambientLight);
 
-    // 2. Hemisphere light: soft blue sky above, gentle pale reflection from city below
-    this.hemiLight = new THREE.HemisphereLight(0x87ceeb, 0xeaf5ff, 0.9);
-    this.hemiLight.position.set(0, 50, 0);
+    // 2. Hemisphere light: soft azure sky above, gentle architectural ground bounce
+    this.hemiLight = new THREE.HemisphereLight(0x8cd3ff, 0xeef7ff, 0.85);
+    this.hemiLight.position.set(0, 60, 0);
     this.scene.add(this.hemiLight);
 
-    // 3. Bright golden sun with directional soft shadows
-    this.sunLight = new THREE.DirectionalLight(0xfffaed, 2.2);
+    // 3. Bright golden sunlight with high-resolution directional soft shadows
+    this.sunLight = new THREE.DirectionalLight(0xfffaee, 2.25);
     this.sunLight.position.set(28, 55, 30);
     this.sunLight.castShadow = true;
-    this.sunLight.shadow.mapSize.width = 1024;
-    this.sunLight.shadow.mapSize.height = 1024;
+    this.sunLight.shadow.mapSize.width = 2048;
+    this.sunLight.shadow.mapSize.height = 2048;
     this.sunLight.shadow.camera.near = 0.5;
-    this.sunLight.shadow.camera.far = 160;
-    this.sunLight.shadow.camera.left = -25;
-    this.sunLight.shadow.camera.right = 25;
-    this.sunLight.shadow.camera.top = 25;
-    this.sunLight.shadow.camera.bottom = -25;
-    this.sunLight.shadow.bias = -0.0008;
+    this.sunLight.shadow.camera.far = 175;
+    this.sunLight.shadow.camera.left = -28;
+    this.sunLight.shadow.camera.right = 28;
+    this.sunLight.shadow.camera.top = 28;
+    this.sunLight.shadow.camera.bottom = -28;
+    this.sunLight.shadow.bias = -0.0004;
+    this.sunLight.shadow.normalBias = 0.02;
     this.scene.add(this.sunLight);
 
-    // 4. Soft sky fill light
-    this.fillLight = new THREE.DirectionalLight(0xbfe7ff, 0.65);
-    this.fillLight.position.set(-25, 30, -25);
+    // 4. Soft sky blue fill light to balance shadow contrast
+    this.fillLight = new THREE.DirectionalLight(0xb2dfff, 0.6);
+    this.fillLight.position.set(-28, 32, -25);
     this.scene.add(this.fillLight);
   }
 
   setupSkyCity() {
     this.buildings = [];
     const boxGeo = new THREE.BoxGeometry(1, 1, 1);
-    const cylinderGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 12);
+    const cylinderGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 16);
 
-    // Clean, vibrant architectural materials
-    const whiteFacadeMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
+    // Ultra-HD Architectural Materials with procedural facade textures
+    const glassFacadeMat = new THREE.MeshStandardMaterial({
+      map: Assets.getBuildingFacadeTexture(0),
+      roughness: 0.18,
+      metalness: 0.55
+    });
+
+    const whiteCeramicMat = new THREE.MeshStandardMaterial({
+      map: Assets.getBuildingFacadeTexture(1),
+      roughness: 0.28,
+      metalness: 0.2
+    });
+
+    const highTechMat = new THREE.MeshStandardMaterial({
+      map: Assets.getBuildingFacadeTexture(2),
       roughness: 0.35,
-      metalness: 0.12
+      metalness: 0.45
     });
 
-    const skyBlueGlassMat = new THREE.MeshStandardMaterial({
-      color: 0x5ab2ff,
-      roughness: 0.15,
-      metalness: 0.7,
-      transparent: true,
-      opacity: 0.88
-    });
-
-    const yellowAccentMat = new THREE.MeshStandardMaterial({
+    const rooftopAccentMat = new THREE.MeshStandardMaterial({
       color: 0xffd34e,
-      roughness: 0.3,
-      metalness: 0.35
+      roughness: 0.25,
+      metalness: 0.4
     });
 
-    const orangeAccentMat = new THREE.MeshStandardMaterial({
-      color: 0xff6b4a,
-      roughness: 0.3,
-      metalness: 0.25
-    });
-
-    const greenGardenMat = new THREE.MeshStandardMaterial({
-      color: 0x64c800,
-      roughness: 0.8,
-      metalness: 0.05
+    const beaconLightMat = new THREE.MeshBasicMaterial({
+      color: 0xff453a
     });
 
     const bridgeMat = new THREE.MeshStandardMaterial({
@@ -120,61 +126,63 @@ export class World {
       metalness: 0.45
     });
 
-    // Populate 48 dynamic buildings along trackside
-    this.buildingInterval = 10.5;
+    // Populate 48 dynamic high-rise towers along trackside
+    this.buildingInterval = 11.0;
     const totalBuildings = 48;
     this.furthestBuildingZ = 0;
 
     for (let i = 0; i < totalBuildings; i++) {
-      const bHeight = 35 + Math.random() * 85;
-      const bWidth = 14 + Math.random() * 16;
-      const bDepth = 15 + Math.random() * 20;
+      const bHeight = 45 + Math.random() * 95;
+      const bWidth = 16 + Math.random() * 18;
+      const bDepth = 16 + Math.random() * 22;
       const side = (i % 2 === 0) ? -1 : 1;
-      const xDist = 24 + Math.random() * 40;
+      const xDist = 26 + Math.random() * 42;
       const x = side * xDist;
       const z = 20 - i * this.buildingInterval;
 
       const building = new THREE.Group();
 
+      // Alternate architectural facade styles
+      let selectedMat = whiteCeramicMat;
+      if (i % 3 === 0) selectedMat = glassFacadeMat;
+      else if (i % 3 === 1) selectedMat = highTechMat;
+
       // Main tower body
-      const tower = new THREE.Mesh(boxGeo, whiteFacadeMat);
+      const tower = new THREE.Mesh(boxGeo, selectedMat);
       tower.scale.set(bWidth, bHeight, bDepth);
       tower.position.set(0, bHeight / 2 - 8, 0);
 
-      // Frustum-aware shadow culling: only cast shadows from buildings close to track
-      if (xDist < 30) {
+      if (xDist < 35) {
         tower.castShadow = true;
       }
       tower.receiveShadow = true;
       building.add(tower);
 
-      // Architectural window accents (1-2 clean horizontal bands per building instead of 10)
-      const band = new THREE.Mesh(boxGeo, skyBlueGlassMat);
-      band.scale.set(bWidth + 0.35, Math.min(8.0, bHeight * 0.22), bDepth + 0.35);
-      band.position.set(0, bHeight * 0.45, 0);
-      building.add(band);
-
-      // Rooftop features
-      if (Math.random() > 0.5) {
-        const garden = new THREE.Mesh(boxGeo, greenGardenMat);
-        garden.scale.set(bWidth * 0.88, 1.4, bDepth * 0.88);
-        garden.position.set(0, bHeight - 7.3, 0);
-        building.add(garden);
-      } else {
-        const spire = new THREE.Mesh(
-          cylinderGeo,
-          Math.random() > 0.5 ? yellowAccentMat : orangeAccentMat
-        );
-        spire.scale.set(1.6, 14, 1.6);
-        spire.position.set(0, bHeight - 2, 0);
+      // Rooftop architectural crown / communications spire
+      if (i % 2 === 0) {
+        // High-Tech rooftop communications mast with beacon
+        const spire = new THREE.Mesh(cylinderGeo, rooftopAccentMat);
+        spire.scale.set(1.4, 16, 1.4);
+        spire.position.set(0, bHeight - 1, 0);
         building.add(spire);
+
+        const beacon = new THREE.Mesh(boxGeo, beaconLightMat);
+        beacon.scale.set(0.8, 0.8, 0.8);
+        beacon.position.set(0, bHeight + 7, 0);
+        building.add(beacon);
+      } else {
+        // Stepped rooftop penthouse crown
+        const crown = new THREE.Mesh(boxGeo, glassFacadeMat);
+        crown.scale.set(bWidth * 0.72, 8, bDepth * 0.72);
+        crown.position.set(0, bHeight - 4, 0);
+        building.add(crown);
       }
 
-      // Occasional overhead skybridge
+      // Overhead futuristic skybridge connecting select towers across the sky
       if (i % 8 === 0 && side === -1) {
         const skybridge = new THREE.Mesh(boxGeo, bridgeMat);
-        skybridge.scale.set(65, 3.5, 6);
-        skybridge.position.set(28, 24, 0);
+        skybridge.scale.set(70, 3.8, 6.5);
+        skybridge.position.set(30, 26, 0);
         building.add(skybridge);
       }
 
@@ -187,21 +195,36 @@ export class World {
       }
     }
 
-    // Decorative Main Menu Hero Platform / Terminal
+    // Hero Platform / Terminal for Main Menu scene
     this.menuPedestal = new THREE.Group();
-    const pedGeo = new THREE.CylinderGeometry(0.55, 0.65, 0.92, 20);
-    const pedMesh = new THREE.Mesh(pedGeo, whiteFacadeMat);
+    const pedGeo = new THREE.CylinderGeometry(0.58, 0.68, 0.92, 24);
+    const pedMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.3,
+      metalness: 0.15
+    });
+    const pedMesh = new THREE.Mesh(pedGeo, pedMat);
     pedMesh.position.y = 0.46;
     pedMesh.castShadow = true;
     this.menuPedestal.add(pedMesh);
 
-    const pedTopGeo = new THREE.CylinderGeometry(0.62, 0.62, 0.08, 20);
-    const pedTopMesh = new THREE.Mesh(pedTopGeo, skyBlueGlassMat);
+    const pedTopGeo = new THREE.CylinderGeometry(0.64, 0.64, 0.08, 24);
+    const pedTopMat = new THREE.MeshStandardMaterial({
+      color: 0x5ab2ff,
+      roughness: 0.12,
+      metalness: 0.7
+    });
+    const pedTopMesh = new THREE.Mesh(pedTopGeo, pedTopMat);
     pedTopMesh.position.y = 0.94;
     this.menuPedestal.add(pedTopMesh);
 
     const pedHoloGeo = new THREE.BoxGeometry(0.5, 0.35, 0.04);
-    const pedHoloMesh = new THREE.Mesh(pedHoloGeo, yellowAccentMat);
+    const pedHoloMat = new THREE.MeshStandardMaterial({
+      color: 0xffd34e,
+      roughness: 0.25,
+      metalness: 0.4
+    });
+    const pedHoloMesh = new THREE.Mesh(pedHoloGeo, pedHoloMat);
     pedHoloMesh.position.set(0, 1.16, 0);
     pedHoloMesh.rotation.x = -0.25;
     this.menuPedestal.add(pedHoloMesh);
@@ -212,23 +235,23 @@ export class World {
 
   setupClouds() {
     this.clouds = [];
-    this.cloudInterval = 20.0;
+    this.cloudInterval = 22.0;
     const cloudMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      roughness: 0.95,
+      roughness: 0.9,
       metalness: 0.0,
       transparent: true,
-      opacity: 0.85
+      opacity: 0.88
     });
 
-    const sphereGeo = new THREE.SphereGeometry(1, 7, 7);
+    const sphereGeo = new THREE.SphereGeometry(1, 8, 8);
     const totalClouds = 18;
     this.furthestCloudZ = 0;
 
     for (let c = 0; c < totalClouds; c++) {
       const cluster = new THREE.Group();
       const puffs = 3 + Math.floor(Math.random() * 3);
-      const baseScale = 9 + Math.random() * 11;
+      const baseScale = 10 + Math.random() * 12;
 
       for (let p = 0; p < puffs; p++) {
         const puff = new THREE.Mesh(sphereGeo, cloudMat);
@@ -245,8 +268,8 @@ export class World {
         cluster.add(puff);
       }
 
-      const x = (Math.random() - 0.5) * 260;
-      const y = 65 + Math.random() * 45;
+      const x = (Math.random() - 0.5) * 280;
+      const y = 70 + Math.random() * 45;
       const z = 20 - c * this.cloudInterval;
       cluster.position.set(x, y, z);
       this.scene.add(cluster);
@@ -259,7 +282,7 @@ export class World {
   }
 
   setupSpeedSlipstreamStreaks() {
-    const streakCount = 45;
+    const streakCount = 50;
     this.slipstreamGeo = new THREE.BufferGeometry();
     const positions = new Float32Array(streakCount * 6);
 
@@ -268,8 +291,8 @@ export class World {
       const side = (i % 2 === 0) ? -1 : 1;
       const x = side * (4.2 + Math.random() * 5.5);
       const y = 0.8 + Math.random() * 3.5;
-      const zRel = -Math.random() * 65;
-      const length = 2.5 + Math.random() * 3.5;
+      const zRel = -Math.random() * 70;
+      const length = 2.8 + Math.random() * 4.0;
 
       this.slipstreamData.push({ x, y, zRel, length });
 
@@ -296,14 +319,14 @@ export class World {
   }
 
   setupGroundEffectsParticles() {
-    const pCount = 48;
+    const pCount = 56;
     const pGeo = new THREE.BufferGeometry();
     const pos = new Float32Array(pCount * 3);
     pGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
 
     this.groundParticleMat = new THREE.PointsMaterial({
       color: 0xffffff,
-      size: 0.18,
+      size: 0.20,
       transparent: true,
       opacity: 0,
       blending: THREE.NormalBlending
@@ -317,12 +340,15 @@ export class World {
 
   emitDustPuff(x, y, z, count = 4, spread = 0.2, upwards = 1.8) {
     if (this.qualityTier === 'PERFORMANCE' && Math.random() > 0.4) {
-      return; // Save CPU on particle physics when in performance mode
+      return;
     }
 
-    const actualCount = this.qualityTier === 'HIGH' ? count : Math.ceil(count * 0.6);
+    const actualCount = (this.qualityTier === 'MAX_4K' || this.qualityTier === 'ULTRA' || this.qualityTier === 'HIGH')
+      ? count
+      : Math.ceil(count * 0.6);
+
     for (let i = 0; i < actualCount; i++) {
-      if (this.particles.length > 40) this.particles.shift();
+      if (this.particles.length > 50) this.particles.shift();
       this.particles.push({
         x: x + (Math.random() - 0.5) * spread,
         y: y + Math.random() * 0.05,
@@ -337,30 +363,42 @@ export class World {
   }
 
   /**
-   * Adaptive Graphics Quality Configuration
-   * @param {'HIGH' | 'BALANCED' | 'PERFORMANCE'} tier
+   * Set Graphics Quality Tier
+   * @param {'MAX_4K' | 'ULTRA' | 'HIGH' | 'BALANCED' | 'PERFORMANCE'} tier
    */
   setQuality(tier) {
     this.qualityTier = tier;
 
-    if (tier === 'HIGH') {
+    if (tier === 'MAX_4K') {
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.autoUpdate = true;
       if (this.sunLight) {
         this.sunLight.castShadow = true;
-        this.sunLight.shadow.mapSize.set(1024, 1024);
+        this.sunLight.shadow.mapSize.set(2048, 2048);
+      }
+    } else if (tier === 'ULTRA') {
+      this.renderer.shadowMap.enabled = true;
+      this.renderer.shadowMap.autoUpdate = true;
+      if (this.sunLight) {
+        this.sunLight.castShadow = true;
+        this.sunLight.shadow.mapSize.set(2048, 2048);
+      }
+    } else if (tier === 'HIGH') {
+      this.renderer.shadowMap.enabled = true;
+      this.renderer.shadowMap.autoUpdate = true;
+      if (this.sunLight) {
+        this.sunLight.castShadow = true;
+        this.sunLight.shadow.mapSize.set(2048, 2048);
       }
     } else if (tier === 'BALANCED') {
       this.renderer.shadowMap.enabled = true;
-      // Staggered shadow map pass: autoUpdate false, updated every 2nd frame in update()
       this.renderer.shadowMap.autoUpdate = false;
       this.renderer.shadowMap.needsUpdate = true;
       if (this.sunLight) {
         this.sunLight.castShadow = true;
-        this.sunLight.shadow.mapSize.set(512, 512);
+        this.sunLight.shadow.mapSize.set(1024, 1024);
       }
     } else if (tier === 'PERFORMANCE') {
-      // Disable shadow map rendering; vibrant ambient + hemisphere + directional daylight remains
       this.renderer.shadowMap.enabled = false;
       this.renderer.shadowMap.autoUpdate = false;
       if (this.sunLight) {
@@ -369,6 +407,23 @@ export class World {
     }
 
     this.resize();
+  }
+
+  /**
+   * Returns current internal WebGL drawing-buffer dimensions
+   * @returns {{ width: number, height: number }}
+   */
+  getDrawingBufferSize() {
+    const size = new THREE.Vector2();
+    this.renderer.getDrawingBufferSize(size);
+    return { width: Math.round(size.x), height: Math.round(size.y) };
+  }
+
+  /**
+   * Returns effective device pixel ratio applied to renderer
+   */
+  getEffectiveDpr() {
+    return this.renderer.getPixelRatio();
   }
 
   update(playerPos, speed = 22.0, dt = 0.016) {
@@ -499,27 +554,58 @@ export class World {
     }
   }
 
+  /**
+   * Ultra-HD Resolution & Drawing-Buffer System
+   * Accurately scales the WebGL canvas drawing buffer from 1080p up to 4K UHD.
+   * Keeps CSS styling synchronized (width: 100%, height: 100%) with zero stretching.
+   */
   resize(width, height) {
     const container = this.canvas.parentElement;
-    const w = width || (container ? container.clientWidth : window.innerWidth);
-    const h = height || (container ? container.clientHeight : window.innerHeight);
+    const w = width || (container ? container.clientWidth : window.innerWidth) || window.innerWidth;
+    const h = height || (container ? container.clientHeight : window.innerHeight) || window.innerHeight;
 
-    // Calibrated DPR limits to prevent GPU fill-rate saturation on high-density laptop & mobile screens
     const isMobile = window.innerWidth <= 768 || /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-    let maxDpr = 1.0;
+    const nativeDpr = window.devicePixelRatio || 1;
 
-    if (this.qualityTier === 'HIGH') {
-      maxDpr = isMobile ? 1.0 : 1.25;
+    let targetDpr = 1.0;
+
+    if (this.qualityTier === 'MAX_4K') {
+      // 4K Ultra HD Target: up to 3840 x 2160
+      const desiredDpr = Math.max(2160 / h, 3840 / w);
+      targetDpr = Math.max(nativeDpr, Math.min(desiredDpr, 3.5));
+    } else if (this.qualityTier === 'ULTRA') {
+      // Quad HD Target: up to 2560 x 1440
+      const desiredDpr = Math.max(1440 / h, 2560 / w);
+      targetDpr = Math.max(nativeDpr, Math.min(desiredDpr, 2.5));
+    } else if (this.qualityTier === 'HIGH') {
+      // Full HD 1080p Minimum Target: at least 1920 x 1080 on capable displays
+      const desiredDpr = Math.max(1080 / h, 1920 / w);
+      if (isMobile) {
+        targetDpr = Math.min(nativeDpr, 2.0);
+      } else {
+        targetDpr = Math.max(nativeDpr, Math.min(desiredDpr, 2.0));
+      }
     } else if (this.qualityTier === 'BALANCED') {
-      maxDpr = 1.0;
+      // Balanced: 1080p target on desktop, 1.25 DPR max on mobile
+      if (isMobile) {
+        targetDpr = Math.min(nativeDpr, 1.25);
+      } else {
+        const desiredDpr = Math.max(1080 / h, 1920 / w);
+        targetDpr = Math.min(Math.max(nativeDpr, desiredDpr), 1.5);
+      }
     } else {
-      maxDpr = isMobile ? 0.85 : 1.0;
+      // PERFORMANCE: 1.0 DPR on desktop, 0.85 DPR on mobile
+      targetDpr = isMobile ? Math.min(nativeDpr * 0.85, 1.0) : 1.0;
     }
 
-    const dpr = Math.min(window.devicePixelRatio || 1, maxDpr);
+    // Hardware safety clamp to prevent GPU buffer allocation failure
+    const maxGlSize = 4096;
+    if (w * targetDpr > maxGlSize) targetDpr = maxGlSize / w;
+    if (h * targetDpr > maxGlSize) targetDpr = maxGlSize / h;
 
     this.renderer.setSize(w, h, false);
-    this.renderer.setPixelRatio(dpr);
+    this.renderer.setPixelRatio(targetDpr);
+
     return { width: w, height: h };
   }
 }

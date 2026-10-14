@@ -10,9 +10,10 @@ import { MediaPipe } from '../gesture/MediaPipeService.js';
 import { Gestures } from '../gesture/GestureController.js';
 
 export class DiagnosticPanel {
-  constructor(container, perfMonitor = null) {
+  constructor(container, perfMonitor = null, world = null) {
     this.container = container;
     this.perfMonitor = perfMonitor;
+    this.world = world;
     this.element = null;
     this.isExpanded = false;
     this.timerId = null;
@@ -24,6 +25,10 @@ export class DiagnosticPanel {
 
   setPerfMonitor(perfMonitor) {
     this.perfMonitor = perfMonitor;
+  }
+
+  setWorld(world) {
+    this.world = world;
   }
 
   build() {
@@ -69,6 +74,14 @@ export class DiagnosticPanel {
             <tr>
               <td>Graphics Quality</td>
               <td id="diag-stat-quality"><span class="diag-tag-yes">HIGH</span></td>
+            </tr>
+            <tr>
+              <td>Drawing Buffer Res</td>
+              <td id="diag-stat-draw-res" class="neon-text">-- x --</td>
+            </tr>
+            <tr>
+              <td>Effective Render DPR</td>
+              <td id="diag-stat-dpr">--</td>
             </tr>
             <tr>
               <td>Draw Calls</td>
@@ -126,6 +139,8 @@ export class DiagnosticPanel {
       speed: this.element.querySelector('#diag-stat-speed'),
       actionLatency: this.element.querySelector('#diag-stat-action-latency'),
       quality: this.element.querySelector('#diag-stat-quality'),
+      drawRes: this.element.querySelector('#diag-stat-draw-res'),
+      dpr: this.element.querySelector('#diag-stat-dpr'),
       drawcalls: this.element.querySelector('#diag-stat-drawcalls'),
       camState: this.element.querySelector('#diag-stat-cam-state'),
       camRes: this.element.querySelector('#diag-stat-cam-res'),
@@ -199,6 +214,18 @@ export class DiagnosticPanel {
         if (this.refs.drawcalls) {
           this.refs.drawcalls.textContent = metrics.drawCalls > 0 ? `${metrics.drawCalls} calls` : '--';
         }
+      }
+    }
+
+    if (this.isExpanded && this.world) {
+      if (this.refs.drawRes && this.world.getDrawingBufferSize) {
+        const buf = this.world.getDrawingBufferSize();
+        this.refs.drawRes.textContent = `${buf.width} × ${buf.height}`;
+      }
+      if (this.refs.dpr && this.world.getEffectiveDpr) {
+        const effDpr = this.world.getEffectiveDpr();
+        const natDpr = window.devicePixelRatio || 1;
+        this.refs.dpr.textContent = `${effDpr.toFixed(2)}x (Display: ${natDpr}x)`;
       }
     }
 

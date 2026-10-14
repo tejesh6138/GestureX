@@ -1,18 +1,21 @@
 /**
  * AI Gesture Runner 3D - Track
- * High-Performance Procedural 3-lane Subway Surfers-inspired railway track.
- * Uses InstancedMesh for concrete sleepers, shared geometries/materials,
- * and O(1) circular chunk recycling for maximum frame rate.
+ * Ultra-HD Procedural 3-lane Subway Surfers-inspired railway track:
+ * - High-resolution crushed stone ballast gravel bed with depth and speckle detailing.
+ * - Instanced wooden/concrete railway sleepers with steel tie-plates and hex bolts.
+ * - Mirror-polished steel rails with razor-sharp specular running surface highlights.
+ * - Platform safety curbs with high-visibility diagonal hazard warning stripes.
+ * - Overhead futuristic station gantries and trackside stylized planters.
+ * - O(1) circular chunk recycling for maximum frame rate.
  */
 
 import * as THREE from 'three';
 import { GAME_CONFIG } from '../core/GameConfig.js';
-import { AssetLoader } from '../utils/AssetLoader.js';
+import { Assets } from '../utils/AssetLoader.js';
 
 export class Track {
   constructor(scene) {
     this.scene = scene;
-    this.assetLoader = new AssetLoader();
     this.chunks = [];
     this.chunkLength = GAME_CONFIG.TRACK.CHUNK_LENGTH || 60.0;
     this.totalChunks = GAME_CONFIG.TRACK.ACTIVE_CHUNKS || 6;
@@ -26,45 +29,53 @@ export class Track {
   }
 
   initMaterials() {
-    // 1. Light ballast railway gravel bed
+    // 1. Ultra-HD Crushed stone ballast gravel track bed
     this.ballastMaterial = new THREE.MeshStandardMaterial({
-      color: 0xc8d8e8,
+      map: Assets.getTrackBallastTexture(),
       roughness: 0.85,
       metalness: 0.05
     });
 
-    // 2. Wooden railway sleepers (ties)
+    // 2. Weathered railway sleepers with steel tie-plates & hex bolts
     this.sleeperMaterial = new THREE.MeshStandardMaterial({
-      color: 0x6d4c41,
-      roughness: 0.75,
-      metalness: 0.1
+      map: Assets.getSleeperTexture(),
+      roughness: 0.65,
+      metalness: 0.15
     });
 
-    // 3. Polished steel rails (metallic shine)
+    // 3. Mirror-polished steel rails
     this.railMaterial = new THREE.MeshStandardMaterial({
-      color: 0xe0e8f0,
+      color: 0xdae2ec,
       metalness: 0.92,
       roughness: 0.18
     });
 
-    // 4. White & Sky-Blue side platform curbs
-    this.curbMaterial = new THREE.MeshStandardMaterial({
+    // High-gloss polished rail running surface (creates specular sun glare down the tracks)
+    this.railCapMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      roughness: 0.4,
+      metalness: 0.98,
+      roughness: 0.06
+    });
+
+    // 4. White platform walkway curbs
+    this.curbMaterial = new THREE.MeshStandardMaterial({
+      color: 0xf8fafc,
+      roughness: 0.35,
       metalness: 0.1
     });
 
+    // Sharp 45° yellow & dark slate hazard warning stripes
     this.warningStripeMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffd34e,
+      map: Assets.getHazardStripeTexture(),
       roughness: 0.3,
-      metalness: 0.2
+      metalness: 0.15
     });
 
     // 5. Overhead Sky Gantry Structure
     this.gantryMaterial = new THREE.MeshStandardMaterial({
       color: 0x008bff,
-      roughness: 0.35,
-      metalness: 0.4
+      roughness: 0.3,
+      metalness: 0.45
     });
 
     this.gantryAccentMat = new THREE.MeshStandardMaterial({
@@ -75,21 +86,21 @@ export class Track {
 
     // 6. Lush green foliage for trackside planters
     this.foliageMaterial = new THREE.MeshStandardMaterial({
-      color: 0x6ec207,
-      roughness: 0.7,
+      color: 0x5eb800,
+      roughness: 0.65,
       metalness: 0.05
     });
 
     this.woodTrunkMaterial = new THREE.MeshStandardMaterial({
-      color: 0x795548,
+      color: 0x6d4c41,
       roughness: 0.8
     });
 
     // 7. Elevated Sky Pillar Material
     this.pillarMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      roughness: 0.5,
-      metalness: 0.1
+      roughness: 0.45,
+      metalness: 0.15
     });
   }
 
@@ -97,14 +108,15 @@ export class Track {
     this.bedGeo = new THREE.BoxGeometry(this.trackWidth, 0.7, this.chunkLength);
     this.sleeperGeo = new THREE.BoxGeometry(1.9, 0.09, 0.32);
     this.railGeo = new THREE.BoxGeometry(0.08, 0.16, this.chunkLength);
+    this.railCapGeo = new THREE.BoxGeometry(0.05, 0.02, this.chunkLength);
     this.curbGeo = new THREE.BoxGeometry(0.7, 0.45, this.chunkLength);
-    this.stripeGeo = new THREE.BoxGeometry(0.18, 0.05, this.chunkLength);
+    this.stripeGeo = new THREE.BoxGeometry(0.24, 0.05, this.chunkLength);
     this.trunkGeo = new THREE.CylinderGeometry(0.2, 0.28, 1.8, 8);
     this.foliageGeo = new THREE.DodecahedronGeometry(1.1);
-    this.pillarGeo = new THREE.CylinderGeometry(0.9, 1.2, 35, 10);
+    this.pillarGeo = new THREE.CylinderGeometry(0.9, 1.2, 35, 12);
     this.postGeo = new THREE.BoxGeometry(0.45, 6.2, 0.45);
     this.beamGeo = new THREE.BoxGeometry(this.trackWidth + 1.6, 0.5, 0.5);
-    this.signGeo = new THREE.BoxGeometry(3.5, 0.9, 0.15);
+    this.signGeo = new THREE.BoxGeometry(3.8, 1.0, 0.15);
   }
 
   createChunk(chunkIndex) {
@@ -117,7 +129,7 @@ export class Track {
     bed.receiveShadow = true;
     chunkGroup.add(bed);
 
-    // 2. High-Performance Instanced Sleepers (1 draw call for all 99 sleepers in chunk!)
+    // 2. High-Performance Instanced Sleepers (1 draw call for all sleepers in chunk)
     const sleepersPerLane = Math.floor(this.chunkLength / 1.8);
     const totalSleepers = sleepersPerLane * this.laneCenters.length;
     const instancedSleepers = new THREE.InstancedMesh(this.sleeperGeo, this.sleeperMaterial, totalSleepers);
@@ -133,17 +145,28 @@ export class Track {
         instancedSleepers.setMatrixAt(sleeperIdx++, dummyMatrix);
       }
 
-      // Left & Right steel rails (thin ground metallic geometry, receive shadow from obstacles/player)
+      // Left & Right steel rails with specular railhead caps
       const railGauge = 0.68;
+
+      // Left Rail
       const leftRail = new THREE.Mesh(this.railGeo, this.railMaterial);
       leftRail.position.set(laneX - railGauge, 0.12, 0);
       leftRail.receiveShadow = true;
       chunkGroup.add(leftRail);
 
+      const leftCap = new THREE.Mesh(this.railCapGeo, this.railCapMaterial);
+      leftCap.position.set(laneX - railGauge, 0.21, 0);
+      chunkGroup.add(leftCap);
+
+      // Right Rail
       const rightRail = new THREE.Mesh(this.railGeo, this.railMaterial);
       rightRail.position.set(laneX + railGauge, 0.12, 0);
       rightRail.receiveShadow = true;
       chunkGroup.add(rightRail);
+
+      const rightCap = new THREE.Mesh(this.railCapGeo, this.railCapMaterial);
+      rightCap.position.set(laneX + railGauge, 0.21, 0);
+      chunkGroup.add(rightCap);
     });
 
     instancedSleepers.instanceMatrix.needsUpdate = true;
@@ -152,30 +175,32 @@ export class Track {
     // 3. Left and Right Safety Curbs with Yellow Hazard Warning Strip
     const curbWidth = 0.7;
 
-    // Left walkway
+    // Left Walkway
     const leftCurb = new THREE.Mesh(this.curbGeo, this.curbMaterial);
     leftCurb.position.set(-this.trackWidth / 2 + curbWidth / 2, 0.15, 0);
+    leftCurb.receiveShadow = true;
     chunkGroup.add(leftCurb);
 
     const leftStripe = new THREE.Mesh(this.stripeGeo, this.warningStripeMaterial);
-    leftStripe.position.set(-this.trackWidth / 2 + curbWidth, 0.38, 0);
+    leftStripe.position.set(-this.trackWidth / 2 + curbWidth - 0.02, 0.38, 0);
     chunkGroup.add(leftStripe);
 
-    // Right walkway
+    // Right Walkway
     const rightCurb = new THREE.Mesh(this.curbGeo, this.curbMaterial);
     rightCurb.position.set(this.trackWidth / 2 - curbWidth / 2, 0.15, 0);
+    rightCurb.receiveShadow = true;
     chunkGroup.add(rightCurb);
 
     const rightStripe = new THREE.Mesh(this.stripeGeo, this.warningStripeMaterial);
-    rightStripe.position.set(this.trackWidth / 2 - curbWidth, 0.38, 0);
+    rightStripe.position.set(this.trackWidth / 2 - curbWidth + 0.02, 0.38, 0);
     chunkGroup.add(rightStripe);
 
-    // 4. Trackside Stylized Trees
+    // 4. Trackside Planters with Foliage
     const treeCount = 3;
     for (let t = 0; t < treeCount; t++) {
       const tz = -this.chunkLength / 2 + (t + 0.5) * (this.chunkLength / treeCount);
       const side = t % 2 === 0 ? 1 : -1;
-      const tx = side * (this.trackWidth / 2 + 1.2);
+      const tx = side * (this.trackWidth / 2 + 1.3);
 
       const treeGroup = this.createStylizedTree();
       treeGroup.position.set(tx, 0.1, tz);
@@ -200,20 +225,29 @@ export class Track {
   createStylizedTree() {
     const tree = new THREE.Group();
 
+    // Planter base pot
+    const planterGeo = new THREE.BoxGeometry(1.2, 0.45, 1.2);
+    const planter = new THREE.Mesh(planterGeo, this.curbMaterial);
+    planter.position.y = 0.22;
+    planter.castShadow = true;
+    tree.add(planter);
+
     // Trunk
     const trunk = new THREE.Mesh(this.trunkGeo, this.woodTrunkMaterial);
-    trunk.position.y = 0.9;
+    trunk.position.y = 1.1;
+    trunk.castShadow = true;
     tree.add(trunk);
 
-    // Foliage canopy: main foliage casts soft shadow
+    // Foliage canopy
     const foliage1 = new THREE.Mesh(this.foliageGeo, this.foliageMaterial);
-    foliage1.position.y = 2.2;
+    foliage1.position.y = 2.4;
     foliage1.castShadow = true;
     tree.add(foliage1);
 
     const foliage2 = new THREE.Mesh(this.foliageGeo, this.foliageMaterial);
     foliage2.scale.set(0.75, 0.75, 0.75);
-    foliage2.position.set(0.3, 2.9, 0.1);
+    foliage2.position.set(0.3, 3.1, 0.1);
+    foliage2.castShadow = true;
     tree.add(foliage2);
 
     return tree;
@@ -243,7 +277,7 @@ export class Track {
 
     // Center futuristic station destination signboard
     const sign = new THREE.Mesh(this.signGeo, this.gantryAccentMat);
-    sign.position.set(0, pillarHeight - 0.5, 0);
+    sign.position.set(0, pillarHeight - 0.55, 0);
     gantry.add(sign);
 
     return gantry;

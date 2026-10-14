@@ -90,7 +90,7 @@ export class Game {
     this.gameOverScreen = new GameOverScreen(this.uiContainer, (action) => this.handleGameOverAction(action));
     this.settingsScreen = new SettingsScreen(this.uiContainer, (action) => this.handleSettingsAction(action));
     this.resultsScreen = new ResultsScreen(this.uiContainer, (action) => this.handleResultsAction(action));
-    this.diagnosticPanel = new DiagnosticPanel(this.uiContainer, this.loop.perfMonitor);
+    this.diagnosticPanel = new DiagnosticPanel(this.uiContainer, this.loop.perfMonitor, this.world);
 
     // Countdown Overlay
     this.countdownEl = document.createElement('div');

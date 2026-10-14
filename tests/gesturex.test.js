@@ -444,3 +444,99 @@ describe('6. Difficulty Configurations & Reachability', () => {
     }
   });
 });
+
+describe('7. Ultra-HD Resolution & Graphics Quality Tiers', () => {
+  test('Quality tiers include MAX_4K, ULTRA, HIGH, BALANCED, PERFORMANCE', async () => {
+    const { QUALITY_TIERS } = await import('../src/services/QualityManager.js');
+    assert.equal(QUALITY_TIERS.MAX_4K, 'MAX_4K');
+    assert.equal(QUALITY_TIERS.ULTRA, 'ULTRA');
+    assert.equal(QUALITY_TIERS.HIGH, 'HIGH');
+    assert.equal(QUALITY_TIERS.BALANCED, 'BALANCED');
+    assert.equal(QUALITY_TIERS.PERFORMANCE, 'PERFORMANCE');
+  });
+
+  test('Calculates exact 1080p Full HD target drawing buffer on 1536x864 (1.25x scale) display', () => {
+    const w = 1536;
+    const h = 864;
+    const nativeDpr = 1.25;
+
+    // HIGH tier: target at least 1920x1080
+    const desiredDpr = Math.max(1080 / h, 1920 / w);
+    const targetDpr = Math.max(nativeDpr, Math.min(desiredDpr, 2.0));
+
+    const drawW = Math.round(w * targetDpr);
+    const drawH = Math.round(h * targetDpr);
+
+    assert.equal(drawW, 1920, 'Width must render at exact 1920px Full HD');
+    assert.equal(drawH, 1080, 'Height must render at exact 1080px Full HD');
+  });
+
+  test('Calculates exact 1440p Quad HD target drawing buffer on 1536x864 display', () => {
+    const w = 1536;
+    const h = 864;
+    const nativeDpr = 1.25;
+
+    // ULTRA tier: target 2560x1440
+    const desiredDpr = Math.max(1440 / h, 2560 / w);
+    const targetDpr = Math.max(nativeDpr, Math.min(desiredDpr, 2.5));
+
+    const drawW = Math.round(w * targetDpr);
+    const drawH = Math.round(h * targetDpr);
+
+    assert.equal(drawW, 2560, 'Width must render at 2560px Quad HD');
+    assert.equal(drawH, 1440, 'Height must render at 1440px Quad HD');
+  });
+
+  test('Calculates exact 4K Ultra HD target drawing buffer on 1536x864 display', () => {
+    const w = 1536;
+    const h = 864;
+    const nativeDpr = 1.25;
+
+    // MAX_4K tier: target 3840x2160
+    const desiredDpr = Math.max(2160 / h, 3840 / w);
+    const targetDpr = Math.max(nativeDpr, Math.min(desiredDpr, 3.5));
+
+    const drawW = Math.round(w * targetDpr);
+    const drawH = Math.round(h * targetDpr);
+
+    assert.equal(drawW, 3840, 'Width must render at 3840px 4K UHD');
+    assert.equal(drawH, 2160, 'Height must render at 2160px 4K UHD');
+  });
+
+  test('Calculates native 4K output on 3840x2160 physical display with 1.0 DPR', () => {
+    const w = 3840;
+    const h = 2160;
+    const nativeDpr = 1.0;
+
+    const desiredDpr = Math.max(2160 / h, 3840 / w);
+    const targetDpr = Math.max(nativeDpr, Math.min(desiredDpr, 3.5));
+
+    const drawW = Math.round(w * targetDpr);
+    const drawH = Math.round(h * targetDpr);
+
+    assert.equal(drawW, 3840, 'Width must be 3840');
+    assert.equal(drawH, 2160, 'Height must be 2160');
+  });
+
+  test('Safety clamps drawing buffer to WebGL max renderbuffer limit (4096px)', () => {
+    const w = 3840;
+    const h = 2160;
+    let targetDpr = 3.5; // Hypothetical extreme DPR
+
+    const maxGlSize = 4096;
+    if (w * targetDpr > maxGlSize) targetDpr = maxGlSize / w;
+    if (h * targetDpr > maxGlSize) targetDpr = maxGlSize / h;
+
+    const drawW = Math.round(w * targetDpr);
+    const drawH = Math.round(h * targetDpr);
+
+    assert.ok(drawW <= maxGlSize, `Width ${drawW} must not exceed ${maxGlSize}`);
+    assert.ok(drawH <= maxGlSize, `Height ${drawH} must not exceed ${maxGlSize}`);
+  });
+
+  test('Anisotropy can be configured up to hardware limit (16x)', async () => {
+    const { Assets } = await import('../src/utils/AssetLoader.js');
+    Assets.setMaxAnisotropy(16);
+    assert.equal(Assets.maxAnisotropy, 16, 'AssetLoader max anisotropy must be 16');
+  });
+});

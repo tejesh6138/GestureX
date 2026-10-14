@@ -48,14 +48,16 @@ export class SettingsScreen {
           <div class="setting-row">
             <div class="setting-info">
               <span class="setting-title">Graphics Quality</span>
-              <span class="setting-desc">Shadows, particles, and antialiasing</span>
+              <span class="setting-desc">Resolution target, shadows, materials, and textures</span>
             </div>
             <div class="setting-ctrl">
               <select id="set-graphics" class="select-input">
                 <option value="auto" ${current.graphicsQuality === 'auto' || !current.graphicsQuality ? 'selected' : ''}>Auto (Adaptive 60–120 FPS)</option>
-                <option value="high" ${current.graphicsQuality === 'high' ? 'selected' : ''}>High (Full Cyber Bloom)</option>
-                <option value="medium" ${current.graphicsQuality === 'medium' ? 'selected' : ''}>Medium (Balanced)</option>
-                <option value="low" ${current.graphicsQuality === 'low' ? 'selected' : ''}>Low (Battery Saver)</option>
+                <option value="4k" ${current.graphicsQuality === '4k' ? 'selected' : ''}>Maximum / 4K UHD (3840 × 2160)</option>
+                <option value="ultra" ${current.graphicsQuality === 'ultra' ? 'selected' : ''}>Ultra / Quad HD (2560 × 1440)</option>
+                <option value="high" ${current.graphicsQuality === 'high' ? 'selected' : ''}>High / Full HD (1920 × 1080)</option>
+                <option value="medium" ${current.graphicsQuality === 'medium' ? 'selected' : ''}>Balanced / 1080p (Optimized)</option>
+                <option value="low" ${current.graphicsQuality === 'low' ? 'selected' : ''}>Performance (Battery Saver)</option>
               </select>
             </div>
           </div>

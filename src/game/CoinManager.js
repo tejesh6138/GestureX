@@ -9,6 +9,7 @@ import { MathUtils } from '../utils/MathUtils.js';
 import { GlobalEvents, EVENTS } from '../core/EventBus.js';
 import { Sound } from '../services/SoundService.js';
 import { OBSTACLE_TYPES } from './ObstacleManager.js';
+import { Assets } from '../utils/AssetLoader.js';
 
 export class CoinManager {
   constructor(scene) {
@@ -32,8 +33,8 @@ export class CoinManager {
     this.coinGeo = new THREE.CylinderGeometry(0.44, 0.44, 0.10, 24);
     this.coinGeo.rotateX(Math.PI / 2);
 
-    // Inner Core Disc Geometry
-    this.coreGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.12, 20);
+    // Inner Core Disc Geometry with embossed face texture
+    this.coreGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.12, 24);
     this.coreGeo.rotateX(Math.PI / 2);
 
     // 5-Point Star Emblem
@@ -51,29 +52,29 @@ export class CoinManager {
     starShape.closePath();
     this.starGeo = new THREE.ShapeGeometry(starShape);
 
-    // Warm luminous metallic gold materials
+    // Warm luminous metallic gold materials with procedural milled face detailing
     this.coinMat = new THREE.MeshStandardMaterial({
       color: 0xffd34e,
       emissive: 0xffa000,
-      emissiveIntensity: 0.45,
-      metalness: 0.92,
-      roughness: 0.2
+      emissiveIntensity: 0.35,
+      metalness: 0.94,
+      roughness: 0.15
     });
 
     this.coreMat = new THREE.MeshStandardMaterial({
-      color: 0xffea79,
+      map: Assets.getCoinFaceTexture(),
       emissive: 0xffc107,
-      emissiveIntensity: 0.35,
-      metalness: 0.85,
-      roughness: 0.25
+      emissiveIntensity: 0.25,
+      metalness: 0.92,
+      roughness: 0.18
     });
 
     this.starMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       emissive: 0xffe57f,
       emissiveIntensity: 0.5,
-      metalness: 0.9,
-      roughness: 0.1
+      metalness: 0.95,
+      roughness: 0.08
     });
   }
 

@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import { GAME_CONFIG } from '../core/GameConfig.js';
 import { MathUtils } from '../utils/MathUtils.js';
+import { Assets } from '../utils/AssetLoader.js';
 
 export const OBSTACLE_TYPES = {
   LOW_BARRIER: 'LOW_BARRIER',     // Red-and-white striped jump barricade (Requires JUMP)
@@ -49,10 +50,16 @@ export class ObstacleManager {
       metalness: 0.1
     });
 
+    this.hazardStripeMat = new THREE.MeshStandardMaterial({
+      map: Assets.getHazardStripeTexture(),
+      roughness: 0.3,
+      metalness: 0.15
+    });
+
     this.supportPostMat = new THREE.MeshStandardMaterial({
-      color: 0x455a64,
-      roughness: 0.6,
-      metalness: 0.3
+      color: 0x37474f,
+      roughness: 0.5,
+      metalness: 0.4
     });
 
     // Overhead high slide barrier materials
@@ -64,64 +71,64 @@ export class ObstacleManager {
 
     this.overheadFrameMat = new THREE.MeshStandardMaterial({
       color: 0x008bff,
-      roughness: 0.4,
-      metalness: 0.3
+      roughness: 0.35,
+      metalness: 0.4
     });
 
     this.overheadSignMat = new THREE.MeshStandardMaterial({
-      color: 0xff7a5c,
+      color: 0xff6b4a,
       roughness: 0.35,
-      metalness: 0.1
+      metalness: 0.2
     });
 
     // Static Cargo Crates & Construction Equipment
     this.crateWoodMat = new THREE.MeshStandardMaterial({
-      color: 0x8d6e63,
-      roughness: 0.8,
-      metalness: 0.05
+      map: Assets.getSleeperTexture(),
+      roughness: 0.75,
+      metalness: 0.1
     });
 
     this.crateCornerMat = new THREE.MeshStandardMaterial({
-      color: 0x37474f,
-      roughness: 0.5,
-      metalness: 0.6
+      color: 0x263238,
+      roughness: 0.4,
+      metalness: 0.7
     });
 
     // Approaching Modern Passenger Train
     this.trainBodyMat = new THREE.MeshStandardMaterial({
-      color: 0x008bff, // Radiant sky blue express body
-      roughness: 0.25,
-      metalness: 0.4
+      map: Assets.getTrainExteriorTexture(),
+      roughness: 0.2,
+      metalness: 0.35
     });
 
     this.trainRoofMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.3,
-      metalness: 0.1
+      color: 0xf8fafc,
+      roughness: 0.25,
+      metalness: 0.2
     });
 
     this.trainTrimMat = new THREE.MeshStandardMaterial({
       color: 0xffd34e, // Sunny yellow aerodynamic stripe
-      roughness: 0.3,
-      metalness: 0.2
+      roughness: 0.25,
+      metalness: 0.35
     });
 
     this.trainGlassMat = new THREE.MeshStandardMaterial({
       color: 0x29b6f6,
-      roughness: 0.1,
-      metalness: 0.8,
+      roughness: 0.08,
+      metalness: 0.85,
       transparent: true,
-      opacity: 0.85
+      opacity: 0.88
     });
 
     this.trainHeadlightMat = new THREE.MeshBasicMaterial({
-      color: 0xfffaed // Bright warm headlights
+      color: 0xfffaee // Bright warm headlights
     });
 
     this.trainBogieMat = new THREE.MeshStandardMaterial({
-      color: 0x263238,
-      roughness: 0.7,
-      metalness: 0.6
+      color: 0x1e272c,
+      roughness: 0.6,
+      metalness: 0.7
     });
   }
 

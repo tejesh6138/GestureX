@@ -1269,6 +1269,7 @@
   box-shadow: var(--card-shadow);
   transition: all 0.2s ease-in-out;
   user-select: none;
+  pointer-events: auto;
 }
 
 .diag-panel-collapsed {
@@ -1276,7 +1277,9 @@
 }
 
 .diag-panel-expanded {
-  width: 290px;
+  width: 315px;
+  max-height: 85vh;
+  overflow-y: auto;
 }
 
 .diag-panel-header {
