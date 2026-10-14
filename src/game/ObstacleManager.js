@@ -28,6 +28,11 @@ export class ObstacleManager {
     this.lanes = [GAME_CONFIG.LANES.LEFT_X, GAME_CONFIG.LANES.CENTER_X, GAME_CONFIG.LANES.RIGHT_X];
     this.animTime = 0;
     this.difficultyManager = null;
+    this.currentSafeLane = 1;
+    this.lastRequiredAction = 'NONE';
+    this.lastActionZ = 0;
+    this.lastPlayerZ = 0;
+    this.lastPlayerSpeed = 22;
 
     this.initSharedMaterials();
   }
@@ -37,6 +42,26 @@ export class ObstacleManager {
   }
 
   initSharedMaterials() {
+    if (typeof document === 'undefined') {
+      const dummyMat = new THREE.MeshBasicMaterial();
+      this.stripedRedMat = dummyMat;
+      this.stripedWhiteMat = dummyMat;
+      this.hazardStripeMat = dummyMat;
+      this.supportPostMat = dummyMat;
+      this.overheadBeamMat = dummyMat;
+      this.overheadFrameMat = dummyMat;
+      this.overheadSignMat = dummyMat;
+      this.crateWoodMat = dummyMat;
+      this.crateCornerMat = dummyMat;
+      this.trainBodyMat = dummyMat;
+      this.trainRoofMat = dummyMat;
+      this.trainTrimMat = dummyMat;
+      this.trainGlassMat = dummyMat;
+      this.trainHeadlightMat = dummyMat;
+      this.trainBogieMat = dummyMat;
+      return;
+    }
+
     // Red & White striped hurdle materials
     this.stripedRedMat = new THREE.MeshStandardMaterial({
       color: 0xee2222,
@@ -133,11 +158,13 @@ export class ObstacleManager {
   }
 
   createObstacleMesh(type) {
+    if (!this.stripedRedMat) {
+      this.initSharedMaterials();
+    }
     const group = new THREE.Group();
 
     if (type === OBSTACLE_TYPES.LOW_BARRIER) {
-      // 1. RED-AND-WHITE STRIPED RAILWAY JUMP BARRIER
-      // Two vertical support legs with base plates
+      // 1. RED-AND-WHITE STRIPED RAILWAY JUMP BARRICADE
       const legGeo = new THREE.BoxGeometry(0.12, 0.85, 0.12);
       const baseGeo = new THREE.BoxGeometry(0.35, 0.08, 0.45);
 
@@ -170,7 +197,6 @@ export class ObstacleManager {
         const mat = (s % 2 === 0) ? this.stripedRedMat : this.stripedWhiteMat;
         const seg = new THREE.Mesh(plankGeo, mat);
         seg.position.set(segX, 0.58, 0);
-        // Shadow optimization: 1 center plank casts the horizontal bar shadow rather than 7 redundant draw calls
         if (s === 3) {
           seg.castShadow = true;
         }
@@ -215,7 +241,6 @@ export class ObstacleManager {
 
     } else if (type === OBSTACLE_TYPES.LANE_BLOCKER) {
       // 3. STATIC RAILWAY OBSTACLES: Stacked Cargo Crates & Trackside Station Equipment
-      // Main lower crate
       const lowerGeo = new THREE.BoxGeometry(2.1, 1.6, 2.6);
       const lowerCrate = new THREE.Mesh(lowerGeo, this.crateWoodMat);
       lowerCrate.position.set(0, 0.8, 0);
@@ -233,7 +258,7 @@ export class ObstacleManager {
       botRim.position.set(0, 0.1, 0);
       group.add(botRim);
 
-      // Secondary upper crate slightly offset for realism
+      // Secondary upper crate
       const upperGeo = new THREE.BoxGeometry(1.7, 1.3, 1.9);
       const upperCrate = new THREE.Mesh(upperGeo, this.overheadBeamMat);
       upperCrate.position.set(0.1, 2.25, -0.1);
@@ -241,12 +266,12 @@ export class ObstacleManager {
       group.add(upperCrate);
 
     } else if (type === OBSTACLE_TYPES.MOVING_TRAIN) {
-      // 4. COLORFUL MODERN PASSENGER TRAIN (Subway Surfers-style express carriage)
+      // 4. COLORFUL MODERN PASSENGER TRAIN
       const trainLength = 7.6;
       const trainWidth = 2.2;
       const trainHeight = 2.9;
 
-      // Aerodynamic Train Body (Sky blue with rounded edges)
+      // Aerodynamic Train Body
       const bodyGeo = new THREE.BoxGeometry(trainWidth, trainHeight * 0.75, trainLength);
       const body = new THREE.Mesh(bodyGeo, this.trainBodyMat);
       body.position.set(0, 1.5, 0);
@@ -266,7 +291,7 @@ export class ObstacleManager {
       stripe.position.set(0, 1.15, 0);
       group.add(stripe);
 
-      // Front Driver Windshield facing the oncoming player (Z+)
+      // Front Driver Windshield
       const frontWindowGeo = new THREE.BoxGeometry(trainWidth * 0.78, 0.95, 0.15);
       const frontWindow = new THREE.Mesh(frontWindowGeo, this.trainGlassMat);
       frontWindow.position.set(0, 1.95, trainLength / 2 + 0.02);
@@ -308,8 +333,252 @@ export class ObstacleManager {
       });
     }
 
-    this.scene.add(group);
+    if (this.scene) {
+      this.scene.add(group);
+    }
     return group;
+  }
+
+  /**
+   * Helper: Resolves the closest railway lane index (0: Left, 1: Center, 2: Right)
+   */
+  getLaneIndex(laneX) {
+    let closestIdx = 1;
+    let minDist = Infinity;
+    for (let i = 0; i < this.lanes.length; i++) {
+      const dist = Math.abs(this.lanes[i] - laneX);
+      if (dist < minDist) {
+        minDist = dist;
+        closestIdx = i;
+      }
+    }
+    return closestIdx;
+  }
+
+  /**
+   * Computes the effective player-space Z encounter interval for any obstacle
+   * (stationary hurdles/crates or oncoming passenger trains).
+   */
+  getObstaclePlayerZRange(obs, playerZ = 0, playerSpeed = 22) {
+    const laneX = obs.mesh ? obs.mesh.position.x : (obs.laneX !== undefined ? obs.laneX : this.lanes[obs.laneIndex !== undefined ? obs.laneIndex : 1]);
+    const laneIndex = obs.laneIndex !== undefined ? obs.laneIndex : this.getLaneIndex(laneX);
+    const zPos = obs.mesh ? obs.mesh.position.z : (obs.z !== undefined ? obs.z : 0);
+
+    if (obs.type === OBSTACLE_TYPES.MOVING_TRAIN) {
+      const cfg = this.difficultyManager ? this.difficultyManager.getConfig() : GAME_CONFIG.OBSTACLES;
+      const trainSpeed = obs.speed !== undefined ? obs.speed : (cfg.MOVING_TRAIN_SPEED !== undefined ? cfg.MOVING_TRAIN_SPEED : 12.0);
+      const relSpeed = Math.max(12, playerSpeed + trainSpeed);
+      const dist = playerZ - zPos;
+
+      // If the train has already passed behind the player
+      if (dist < -6.0) {
+        return null;
+      }
+
+      // Time and player meeting depth
+      const tMeet = dist / relSpeed;
+      const zMeet = playerZ - playerSpeed * tMeet;
+
+      // Train collision half-span in player distance (train half-length 3.6m + player 0.4m)
+      const halfSpan = (4.0 / relSpeed) * playerSpeed;
+
+      // Reaction and maneuver margin required to detect train and clear the lane
+      const entryMargin = Math.max(5.0, playerSpeed * 0.40);
+      const exitMargin = Math.max(2.5, playerSpeed * 0.15);
+
+      return {
+        laneIndex,
+        laneX,
+        type: obs.type,
+        impassable: true,
+        zCenter: zMeet,
+        zMin: zMeet - halfSpan - exitMargin,
+        zMax: zMeet + halfSpan + entryMargin,
+        isTrain: true
+      };
+    } else {
+      let halfDepth = 0.2;
+      let impassable = false;
+      if (obs.type === OBSTACLE_TYPES.LANE_BLOCKER) {
+        halfDepth = 2.1;
+        impassable = true;
+      }
+
+      const buffer = 0.4; // player collision half depth
+      return {
+        laneIndex,
+        laneX,
+        type: obs.type,
+        impassable,
+        zCenter: zPos,
+        zMin: zPos - halfDepth - buffer,
+        zMax: zPos + halfDepth + buffer,
+        isTrain: false
+      };
+    }
+  }
+
+  /**
+   * Validates a candidate set of obstacles against all active obstacles (including moving trains)
+   * to guarantee gameplay fairness, reachability, and zero unavoidable 3-lane blocks.
+   * Returns true if safe and achievable, false if impossible or creates an unavoidable trap.
+   */
+  validateObstaclePattern(candidates = [], playerZ = 0, playerSpeed = 22, diffMode = 'MEDIUM') {
+    const allRanges = [];
+
+    // Active obstacles
+    for (const obs of this.obstacles) {
+      if (!obs.active) continue;
+      const range = this.getObstaclePlayerZRange(obs, playerZ, playerSpeed);
+      if (range) allRanges.push(range);
+    }
+
+    // Candidate obstacles
+    for (const cand of candidates) {
+      const range = this.getObstaclePlayerZRange(cand, playerZ, playerSpeed);
+      if (range) allRanges.push(range);
+    }
+
+    if (allRanges.length === 0) return true;
+
+    // Reaction window size: time required for recognition, cooldown, and lane change
+    let reactionSeconds = 0.45;
+    if (diffMode === 'EASY') reactionSeconds = 0.55;
+    else if (diffMode === 'FAST') reactionSeconds = 0.38;
+    const reactionWindow = Math.max(7.0, playerSpeed * reactionSeconds);
+
+    // Check depths: sample all key boundary points
+    const checkDepths = [];
+    for (const r of allRanges) {
+      checkDepths.push(r.zCenter);
+      checkDepths.push(r.zMin);
+      checkDepths.push(r.zMax);
+    }
+
+    for (const z of checkDepths) {
+      // Find all obstacles overlapping within the reaction window of z
+      const overlapping = allRanges.filter(
+        (r) => Math.abs(r.zCenter - z) <= reactionWindow || (z >= r.zMin && z <= r.zMax)
+      );
+
+      const blockedLanes = [false, false, false];
+      const impassableLanes = [false, false, false];
+      let trainCount = 0;
+
+      for (const r of overlapping) {
+        blockedLanes[r.laneIndex] = true;
+        if (r.impassable) impassableLanes[r.laneIndex] = true;
+        if (r.isTrain) trainCount++;
+      }
+
+      // Condition 1: All three lanes blocked within the reaction window
+      if (blockedLanes[0] && blockedLanes[1] && blockedLanes[2]) {
+        return false;
+      }
+
+      // Condition 2: Two lanes impassable (e.g. train + crate, or 2 crates), and the third lane has any obstacle
+      // within the reaction window. The player in either impassable lane cannot simultaneously switch and dodge.
+      if (impassableLanes.filter(Boolean).length >= 2 && overlapping.length >= 3) {
+        return false;
+      }
+
+      // Condition 3: A moving train is present and either:
+      // a) Another lane is impassable (crate) within reaction window
+      // b) Both side lanes have obstacles
+      if (trainCount > 0) {
+        if (impassableLanes.filter(Boolean).length >= 2) {
+          return false;
+        }
+        if (blockedLanes.filter(Boolean).length >= 3) {
+          return false;
+        }
+      }
+    }
+
+    // Condition 4: Consecutive obstacles spaced closer than the required transition distance
+    const sortedObs = [...allRanges].sort((a, b) => b.zCenter - a.zCenter);
+    for (let i = 0; i < sortedObs.length - 1; i++) {
+      const a = sortedObs[i];
+      const b = sortedObs[i + 1];
+      const dz = Math.abs(a.zCenter - b.zCenter);
+
+      if (a.laneIndex !== b.laneIndex) {
+        const laneDiff = Math.abs(a.laneIndex - b.laneIndex);
+        const minShiftTime = laneDiff === 1 ? 0.35 : 0.70;
+        const minShiftDist = Math.max(laneDiff === 1 ? 6.5 : 13.0, playerSpeed * minShiftTime);
+
+        if (a.impassable && b.impassable && dz < minShiftDist) {
+          const thirdLane = [0, 1, 2].find((l) => l !== a.laneIndex && l !== b.laneIndex);
+          const thirdBlocked = allRanges.some(
+            (r) => r.laneIndex === thirdLane && Math.abs(r.zCenter - (a.zCenter + b.zCenter) / 2) < minShiftDist
+          );
+          if (thirdBlocked) {
+            return false;
+          }
+        }
+      }
+
+      // Conflicting vertical actions (JUMP immediately followed by SLIDE or vice-versa)
+      if (dz < playerSpeed * 0.70) {
+        if (
+          (a.type === OBSTACLE_TYPES.LOW_BARRIER && b.type === OBSTACLE_TYPES.HIGH_BARRIER) ||
+          (a.type === OBSTACLE_TYPES.HIGH_BARRIER && b.type === OBSTACLE_TYPES.LOW_BARRIER)
+        ) {
+          if (a.laneIndex === b.laneIndex) {
+            return false;
+          }
+        }
+      }
+    }
+
+    // Condition 5: Forward Reachability Simulation (Path Feasibility)
+    const minZ = Math.min(...allRanges.map((r) => r.zMin));
+    const stepSize = 1.5;
+    let currentLanes = new Set([this.currentSafeLane !== undefined ? this.currentSafeLane : 1]);
+    let distSinceLaneShift = 0;
+
+    for (let z = playerZ; z >= minZ - 2.0; z -= stepSize) {
+      distSinceLaneShift += stepSize;
+
+      const canShift1 = distSinceLaneShift >= Math.max(6.0, playerSpeed * 0.35);
+      const canShift2 = distSinceLaneShift >= Math.max(12.0, playerSpeed * 0.70);
+
+      const nextLanes = new Set();
+      for (const lane of currentLanes) {
+        nextLanes.add(lane);
+        if (canShift1) {
+          if (lane > 0) nextLanes.add(lane - 1);
+          if (lane < 2) nextLanes.add(lane + 1);
+        }
+        if (canShift2) {
+          nextLanes.add(0);
+          nextLanes.add(1);
+          nextLanes.add(2);
+        }
+      }
+
+      // Filter out lanes that have impassable obstacles at depth z
+      const validLanes = new Set();
+      for (const lane of nextLanes) {
+        const isBlocked = allRanges.some(
+          (r) => r.laneIndex === lane && z >= r.zMin && z <= r.zMax && r.impassable
+        );
+        if (!isBlocked) {
+          validLanes.add(lane);
+        }
+      }
+
+      if (validLanes.size === 0) {
+        return false;
+      }
+
+      if (validLanes.size < nextLanes.size) {
+        distSinceLaneShift = 0;
+      }
+      currentLanes = validLanes;
+    }
+
+    return true;
   }
 
   /**
@@ -369,126 +638,186 @@ export class ObstacleManager {
     const allowTrain = !activeTrain && playerDistance > 50 && Math.random() < trainChance;
 
     if (allowTrain) {
-      // Pick a train lane that is NOT the safe lane
-      const trainLane = MathUtils.randomChoice(otherLanes);
       const trainSpeed = cfg.MOVING_TRAIN_SPEED !== undefined ? cfg.MOVING_TRAIN_SPEED : 12.0;
 
-      // Calculate intersection meeting depth where train meets the player
-      const relSpeed = Math.max(12, playerSpeed + trainSpeed);
-      const tMeet = Math.abs(playerZ - spawnZ) / relSpeed;
-      const zMeet = playerZ - playerSpeed * tMeet;
+      // Test candidate train lanes in otherLanes for reachable, unblocked corridors
+      const candidateTrainLanes = [...otherLanes].sort(() => Math.random() - 0.5);
+      let chosenTrainLane = null;
 
-      // Spawn the approaching modern passenger train
-      this.addObstacle(OBSTACLE_TYPES.MOVING_TRAIN, this.lanes[trainLane], spawnZ);
-
-      // Third lane (neither train nor safe lane): optionally add a jump hurdle
-      const thirdLane = otherLanes.find((l) => l !== trainLane);
-      if (thirdLane !== undefined && Math.random() < 0.40) {
-        this.addObstacle(OBSTACLE_TYPES.LOW_BARRIER, this.lanes[thirdLane], spawnZ);
+      for (const tLane of candidateTrainLanes) {
+        const candidateObs = [
+          { type: OBSTACLE_TYPES.MOVING_TRAIN, laneIndex: tLane, z: spawnZ, speed: trainSpeed }
+        ];
+        if (this.validateObstaclePattern(candidateObs, playerZ, playerSpeed, diffMode)) {
+          chosenTrainLane = tLane;
+          break;
+        }
       }
 
-      // Next safe lane remains 100% OPEN throughout the entire train corridor
-      this.currentSafeLane = nextSafeLane;
-      this.lastRequiredAction = 'TRAIN_PASS';
-      this.lastActionZ = zMeet;
-      return;
+      if (chosenTrainLane !== null) {
+        // Train is safely placed! Spawn the approaching modern passenger train
+        this.addObstacle(OBSTACLE_TYPES.MOVING_TRAIN, this.lanes[chosenTrainLane], spawnZ);
+
+        // Third lane: only place a low hurdle if strictly validated and safe
+        const thirdLane = otherLanes.find((l) => l !== chosenTrainLane);
+        if (thirdLane !== undefined && Math.random() < 0.30) {
+          const hurdleCandidate = [
+            { type: OBSTACLE_TYPES.LOW_BARRIER, laneIndex: thirdLane, z: spawnZ }
+          ];
+          if (this.validateObstaclePattern(hurdleCandidate, playerZ, playerSpeed, diffMode)) {
+            this.addObstacle(OBSTACLE_TYPES.LOW_BARRIER, this.lanes[thirdLane], spawnZ);
+          }
+        }
+
+        const relSpeed = Math.max(12, playerSpeed + trainSpeed);
+        const tMeet = Math.abs(playerZ - spawnZ) / relSpeed;
+        const zMeet = playerZ - playerSpeed * tMeet;
+
+        // Next safe lane remains 100% OPEN throughout the entire train corridor
+        this.currentSafeLane = nextSafeLane;
+        this.lastRequiredAction = 'TRAIN_PASS';
+        this.lastActionZ = zMeet;
+        return;
+      }
+      // If chosenTrainLane is null, train spawn is delayed to prevent an unavoidable trap.
+      // Falls through to validate and spawn safe static obstacles.
     }
 
-    // 3. Prevent incompatible rapid-fire actions (e.g. SLIDE immediately after JUMP or vice versa)
+    // 3. Generate candidate static obstacle patterns
     const distSinceLastAction = Math.abs(spawnZ - this.lastActionZ);
     const minRecoveryDist = playerSpeed * 0.85;
     const canJump = this.lastRequiredAction !== 'SLIDE' || distSinceLastAction > minRecoveryDist;
     const canSlide = this.lastRequiredAction !== 'JUMP' || distSinceLastAction > minRecoveryDist;
 
+    const generateCandidates = (patternType) => {
+      const candidates = [];
+      if (patternType === 'A') {
+        // Pattern A: Clear Runway (100% open across all 3 lanes)
+        return { candidates, action: 'NONE', safeLane: nextSafeLane };
+      }
+      if (patternType === 'B') {
+        // Pattern B: Single Impassable Blocker
+        const blockLane = MathUtils.randomChoice(otherLanes);
+        candidates.push({ type: OBSTACLE_TYPES.LANE_BLOCKER, laneIndex: blockLane, z: spawnZ });
+        const remainingLane = otherLanes.find((l) => l !== blockLane);
+        if (remainingLane !== undefined && canJump && Math.random() < 0.40) {
+          candidates.push({ type: OBSTACLE_TYPES.LOW_BARRIER, laneIndex: remainingLane, z: spawnZ });
+        }
+        return { candidates, action: 'LANE_SHIFT', safeLane: nextSafeLane };
+      }
+      if (patternType === 'C') {
+        // Pattern C: Double Blocker Choke Point (leaving nextSafeLane clear)
+        otherLanes.forEach((laneIdx) => {
+          candidates.push({ type: OBSTACLE_TYPES.LANE_BLOCKER, laneIndex: laneIdx, z: spawnZ });
+        });
+        return { candidates, action: 'LANE_SHIFT', safeLane: nextSafeLane };
+      }
+      if (patternType === 'D' && canJump) {
+        // Pattern D: Red-and-White Low Jump Barricade Sequence
+        candidates.push({ type: OBSTACLE_TYPES.LOW_BARRIER, laneIndex: nextSafeLane, z: spawnZ });
+        const otherHurdleLane = MathUtils.randomChoice(otherLanes);
+        if (Math.random() < 0.50) {
+          candidates.push({ type: OBSTACLE_TYPES.LOW_BARRIER, laneIndex: otherHurdleLane, z: spawnZ });
+        }
+        return { candidates, action: 'JUMP', safeLane: nextSafeLane };
+      }
+      if (patternType === 'E' && canSlide) {
+        // Pattern E: Overhead Slide Clearance Gantry
+        candidates.push({ type: OBSTACLE_TYPES.HIGH_BARRIER, laneIndex: nextSafeLane, z: spawnZ });
+        const otherSlideLane = MathUtils.randomChoice(otherLanes);
+        if (Math.random() < 0.45) {
+          candidates.push({ type: OBSTACLE_TYPES.HIGH_BARRIER, laneIndex: otherSlideLane, z: spawnZ });
+        }
+        return { candidates, action: 'SLIDE', safeLane: nextSafeLane };
+      }
+      // Fallback single blocker
+      const blockLane = MathUtils.randomChoice(otherLanes);
+      candidates.push({ type: OBSTACLE_TYPES.LANE_BLOCKER, laneIndex: blockLane, z: spawnZ });
+      return { candidates, action: 'LANE_SHIFT', safeLane: nextSafeLane };
+    };
+
     const roll = Math.random();
+    let preferredPattern = 'A';
+    if (roll < 0.22) preferredPattern = 'A';
+    else if (roll < 0.48) preferredPattern = 'B';
+    else if (roll < 0.68) preferredPattern = 'C';
+    else if (roll < 0.85 && canJump) preferredPattern = 'D';
+    else if (canSlide) preferredPattern = 'E';
+    else preferredPattern = 'B';
 
-    if (roll < 0.22) {
-      // Pattern A: Clear High-Speed Runway (100% open across all 3 lanes)
-      // Gives breathing room and momentum
-      this.currentSafeLane = nextSafeLane;
-      this.lastRequiredAction = 'NONE';
-      this.lastActionZ = spawnZ;
+    // Patterns to test in order of preference
+    const patternOrder = [preferredPattern, 'B', 'D', 'E', 'A'];
+    let chosen = null;
 
-    } else if (roll < 0.48) {
-      // Pattern B: Single Impassable Blocker (1 lane blocked, 2 lanes clear)
-      // The blocked lane is NEVER the designated safe lane
-      const blockLane = MathUtils.randomChoice(otherLanes);
-      this.addObstacle(OBSTACLE_TYPES.LANE_BLOCKER, this.lanes[blockLane], spawnZ);
-
-      // In the remaining non-safe lane, optionally place a jumpable low hurdle
-      const remainingLane = otherLanes.find((l) => l !== blockLane);
-      if (remainingLane !== undefined && canJump && Math.random() < 0.45) {
-        this.addObstacle(OBSTACLE_TYPES.LOW_BARRIER, this.lanes[remainingLane], spawnZ);
+    for (const pat of patternOrder) {
+      const result = generateCandidates(pat);
+      if (this.validateObstaclePattern(result.candidates, playerZ, playerSpeed, diffMode)) {
+        chosen = result;
+        break;
       }
-
-      this.currentSafeLane = nextSafeLane;
-      this.lastRequiredAction = 'LANE_SHIFT';
-      this.lastActionZ = spawnZ;
-
-    } else if (roll < 0.68) {
-      // Pattern C: Double Blocker Choke Point (2 lanes blocked, exactly 1 safe lane)
-      // Both other lanes are blocked, leaving nextSafeLane 100% clear.
-      // nextSafeLane is guaranteed reachable with at most 1 lane shift.
-      otherLanes.forEach((laneIdx) => {
-        this.addObstacle(OBSTACLE_TYPES.LANE_BLOCKER, this.lanes[laneIdx], spawnZ);
-      });
-
-      this.currentSafeLane = nextSafeLane;
-      this.lastRequiredAction = 'LANE_SHIFT';
-      this.lastActionZ = spawnZ;
-
-    } else if (roll < 0.85 && canJump) {
-      // Pattern D: Red-and-White Low Jump Barricade Sequence
-      // Place low hurdles in 1 or 2 lanes (including nextSafeLane). All hurdles are clearable by JUMP.
-      this.addObstacle(OBSTACLE_TYPES.LOW_BARRIER, this.lanes[nextSafeLane], spawnZ);
-
-      const otherHurdleLane = MathUtils.randomChoice(otherLanes);
-      if (Math.random() < 0.50) {
-        this.addObstacle(OBSTACLE_TYPES.LOW_BARRIER, this.lanes[otherHurdleLane], spawnZ);
-      }
-
-      this.currentSafeLane = nextSafeLane;
-      this.lastRequiredAction = 'JUMP';
-      this.lastActionZ = spawnZ;
-
-    } else if (canSlide) {
-      // Pattern E: Overhead Slide Clearance Gantry
-      // Place overhead beam across 1 or 2 lanes (including nextSafeLane). Clearable by crouching SLIDE.
-      this.addObstacle(OBSTACLE_TYPES.HIGH_BARRIER, this.lanes[nextSafeLane], spawnZ);
-
-      const otherSlideLane = MathUtils.randomChoice(otherLanes);
-      if (Math.random() < 0.45) {
-        this.addObstacle(OBSTACLE_TYPES.HIGH_BARRIER, this.lanes[otherSlideLane], spawnZ);
-      }
-
-      this.currentSafeLane = nextSafeLane;
-      this.lastRequiredAction = 'SLIDE';
-      this.lastActionZ = spawnZ;
-
-    } else {
-      // Fallback: Safe Single Blocker
-      const blockLane = MathUtils.randomChoice(otherLanes);
-      this.addObstacle(OBSTACLE_TYPES.LANE_BLOCKER, this.lanes[blockLane], spawnZ);
-      this.currentSafeLane = nextSafeLane;
-      this.lastRequiredAction = 'NONE';
-      this.lastActionZ = spawnZ;
     }
+
+    if (!chosen) {
+      // Guaranteed safe fallback: Pattern A (Clear Runway - 0 obstacles)
+      chosen = generateCandidates('A');
+    }
+
+    // Spawn the validated obstacles
+    for (const c of chosen.candidates) {
+      this.addObstacle(c.type, this.lanes[c.laneIndex], c.z);
+    }
+
+    this.currentSafeLane = chosen.safeLane;
+    this.lastRequiredAction = chosen.action;
+    this.lastActionZ = spawnZ;
   }
 
   addObstacle(type, laneX, z) {
-    // Secondary Safety Validation: Ensure this obstacle doesn't block all 3 lanes at depth z
-    const toleranceZ = 2.4;
-    const sameDepthObs = this.obstacles.filter(
-      (o) => o.active && Math.abs(o.mesh.position.z - z) < toleranceZ
+    const playerZ = this.lastPlayerZ || 0;
+    const playerSpeed = this.lastPlayerSpeed || 22;
+    const laneIndex = this.getLaneIndex(laneX);
+
+    // Defense-in-depth: Validate that adding this single obstacle doesn't block all 3 lanes
+    const candidateRange = this.getObstaclePlayerZRange(
+      { type, laneIndex, laneX, z },
+      playerZ,
+      playerSpeed
     );
 
-    // If adding this would block all 3 lanes with impassable obstacles, reject it
-    if (type === OBSTACLE_TYPES.LANE_BLOCKER || type === OBSTACLE_TYPES.MOVING_TRAIN) {
-      const impassableCount = sameDepthObs.filter(
-        (o) => o.type === OBSTACLE_TYPES.LANE_BLOCKER || o.type === OBSTACLE_TYPES.MOVING_TRAIN
-      ).length;
-      if (impassableCount >= 2) {
-        // Already 2 lanes blocked at this depth! Do NOT block the 3rd lane.
+    if (candidateRange) {
+      const reactionDist = Math.max(6.0, playerSpeed * 0.35);
+      const overlapping = this.obstacles.filter((o) => {
+        if (!o.active) return false;
+        const r = this.getObstaclePlayerZRange(o, playerZ, playerSpeed);
+        if (!r) return false;
+        return Math.abs(r.zCenter - candidateRange.zCenter) <= reactionDist ||
+               (candidateRange.zMin <= r.zMax && candidateRange.zMax >= r.zMin);
+      });
+
+      const blockedLanes = [false, false, false];
+      blockedLanes[laneIndex] = true;
+      let impassableCount = candidateRange.impassable ? 1 : 0;
+      let trainPresent = candidateRange.isTrain;
+
+      for (const o of overlapping) {
+        const r = this.getObstaclePlayerZRange(o, playerZ, playerSpeed);
+        if (r) {
+          blockedLanes[r.laneIndex] = true;
+          if (r.impassable) impassableCount++;
+          if (r.isTrain) trainPresent = true;
+        }
+      }
+
+      // Reject if all 3 lanes blocked within reaction window
+      if (blockedLanes[0] && blockedLanes[1] && blockedLanes[2]) {
+        return null;
+      }
+      // Reject if 2 lanes impassable and adding an impassable obstacle to another lane
+      if (impassableCount >= 2 && candidateRange.impassable && blockedLanes.filter(Boolean).length >= 3) {
+        return null;
+      }
+      // Reject if a train is present and all 3 lanes would be blocked
+      if (trainPresent && blockedLanes[0] && blockedLanes[1] && blockedLanes[2]) {
         return null;
       }
     }
@@ -518,6 +847,8 @@ export class ObstacleManager {
 
   update(playerZ, dt = 0.016, playerDistance = 0, playerSpeed = 22) {
     this.animTime += dt;
+    this.lastPlayerZ = playerZ;
+    this.lastPlayerSpeed = playerSpeed;
     const spawnDistanceAhead = 150;
     const diffMode = this.difficultyManager ? this.difficultyManager.getMode() : 'MEDIUM';
 
@@ -574,5 +905,7 @@ export class ObstacleManager {
     this.currentSafeLane = 1;
     this.lastRequiredAction = 'NONE';
     this.lastActionZ = 0;
+    this.lastPlayerZ = 0;
+    this.lastPlayerSpeed = 22;
   }
 }

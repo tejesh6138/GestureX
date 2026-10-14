@@ -7,6 +7,7 @@
 
 import { Sound } from '../services/SoundService.js';
 import { MathUtils } from '../utils/MathUtils.js';
+import { AuthService } from '../services/AuthService.js';
 
 export class GameOverScreen {
   constructor(container, onAction) {
@@ -33,6 +34,11 @@ export class GameOverScreen {
         </div>
 
         <h2 class="game-over-title">RUN <span class="neon-danger">COMPLETED</span></h2>
+
+        <!-- Cloud Save Persistence Status Indicator -->
+        <div id="game-over-cloud-status" class="cloud-sync-status sync-local">
+          💾 Saved Locally
+        </div>
 
         <!-- Main Run Metrics Grid -->
         <div class="results-grid">
@@ -165,6 +171,18 @@ export class GameOverScreen {
     this.element.querySelector('#res-pb-score').textContent = MathUtils.formatNumber(pbScore);
     this.element.querySelector('#res-highest-coins').textContent = MathUtils.formatNumber(highestRunCoins || runResult.coinsCollected);
     this.element.querySelector('#res-lifetime-coins').textContent = MathUtils.formatNumber(totalCoins || runResult.coinsCollected);
+
+    // Update Cloud Persistence Status
+    const cloudStatusEl = this.element.querySelector('#game-over-cloud-status');
+    if (cloudStatusEl) {
+      if (AuthService.isLoggedIn()) {
+        cloudStatusEl.className = 'cloud-sync-status sync-saved';
+        cloudStatusEl.textContent = '☁️ Synchronized to Neon Cloud';
+      } else {
+        cloudStatusEl.className = 'cloud-sync-status sync-local';
+        cloudStatusEl.textContent = '💾 Saved Locally (Guest Mode • Login for Global Leaderboard)';
+      }
+    }
 
     // 3. Banner notifications
     const scoreBanner = this.element.querySelector('#new-high-score-banner');

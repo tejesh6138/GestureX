@@ -14,7 +14,7 @@ import { GestureClassifier } from '../src/gesture/GestureClassifier.js';
 import { ScoreService } from '../src/services/ScoreService.js';
 import { StorageService } from '../src/services/StorageService.js';
 import { CollisionSystem } from '../src/game/CollisionSystem.js';
-import { OBSTACLE_TYPES } from '../src/game/ObstacleManager.js';
+import { ObstacleManager, OBSTACLE_TYPES } from '../src/game/ObstacleManager.js';
 import { GlobalEvents, EVENTS } from '../src/core/EventBus.js';
 
 // Helper to construct normalized 21 MediaPipe hand landmarks
@@ -441,6 +441,151 @@ describe('6. Difficulty Configurations & Reachability', () => {
       // Verify that blocked lanes count is at most 2
       assert.ok(blockedLanes.length < laneCount, 'Never block all 3 lanes at same depth');
       assert.ok(blockedLanes.includes(safeLane) === false, 'Safe lane must never be blocked');
+    }
+  });
+
+  test('Validation 1: Rejects impossible pattern with three lanes blocked at same depth', () => {
+    const om = new ObstacleManager(null);
+    om.reset();
+
+    const threeBlocked = [
+      { type: OBSTACLE_TYPES.LOW_BARRIER, laneIndex: 0, z: -50 },
+      { type: OBSTACLE_TYPES.LANE_BLOCKER, laneIndex: 1, z: -50 },
+      { type: OBSTACLE_TYPES.LOW_BARRIER, laneIndex: 2, z: -50 }
+    ];
+    const isSafe = om.validateObstaclePattern(threeBlocked, 0, 22, 'MEDIUM');
+    assert.equal(isSafe, false, 'Pattern with all 3 lanes blocked at depth -50 must be rejected');
+  });
+
+  test('Validation 2: Rejects impossible pattern with train in middle lane and hurdles in both side lanes', () => {
+    const om = new ObstacleManager(null);
+    om.reset();
+
+    // Train spawned at -75 approaching at 12 m/s; player at 0 speed 22 m/s -> encounters train around z = -48.5
+    // Side lanes have hurdles around the encounter depth, trapping the player
+    const trainMiddleHurdlesSides = [
+      { type: OBSTACLE_TYPES.LOW_BARRIER, laneIndex: 0, z: -49 },
+      { type: OBSTACLE_TYPES.MOVING_TRAIN, laneIndex: 1, z: -75, speed: 12 },
+      { type: OBSTACLE_TYPES.LOW_BARRIER, laneIndex: 2, z: -49 }
+    ];
+    const isSafe = om.validateObstaclePattern(trainMiddleHurdlesSides, 0, 22, 'MEDIUM');
+    assert.equal(isSafe, false, 'Train with hurdles in both side lanes must be rejected');
+  });
+
+  test('Validation 3: Rejects impossible pattern with train followed closely by another obstacle group leaving no recovery', () => {
+    const om = new ObstacleManager(null);
+    om.reset();
+
+    // Train encounter around z = -45, followed immediately by double blocker at z = -47
+    const trainFollowedByBlocker = [
+      { type: OBSTACLE_TYPES.MOVING_TRAIN, laneIndex: 1, z: -70, speed: 12 },
+      { type: OBSTACLE_TYPES.LANE_BLOCKER, laneIndex: 0, z: -46 },
+      { type: OBSTACLE_TYPES.LANE_BLOCKER, laneIndex: 2, z: -47 }
+    ];
+    const isSafe = om.validateObstaclePattern(trainFollowedByBlocker, 0, 22, 'MEDIUM');
+    assert.equal(isSafe, false, 'Train encounter overlapping with conflicting blockers must be rejected');
+  });
+
+  test('Validation 4: Rejects impossible pattern where 2 lanes are blocked and remaining lane is blocked shortly afterward', () => {
+    const om = new ObstacleManager(null);
+    om.reset();
+
+    // Lanes 0 and 1 blocked at z = -50; Lane 2 blocked at z = -54 (4m ahead, player needs > 8m at 22m/s to switch)
+    const consecutiveTrap = [
+      { type: OBSTACLE_TYPES.LANE_BLOCKER, laneIndex: 0, z: -50 },
+      { type: OBSTACLE_TYPES.LANE_BLOCKER, laneIndex: 1, z: -50 },
+      { type: OBSTACLE_TYPES.LANE_BLOCKER, laneIndex: 2, z: -54 }
+    ];
+    const isSafe = om.validateObstaclePattern(consecutiveTrap, 0, 22, 'MEDIUM');
+    assert.equal(isSafe, false, 'Consecutive blockers with inadequate transition room must be rejected');
+  });
+
+  test('Validation 5: Fast mode validates dense obstacle patterns against high speed reaction requirements', () => {
+    const om = new ObstacleManager(null);
+    om.reset();
+
+    // At FAST max speed (54 m/s), 10m is < 0.2s, physically impossible to dodge
+    const denseFastPattern = [
+      { type: OBSTACLE_TYPES.LANE_BLOCKER, laneIndex: 0, z: -60 },
+      { type: OBSTACLE_TYPES.LANE_BLOCKER, laneIndex: 1, z: -60 },
+      { type: OBSTACLE_TYPES.LANE_BLOCKER, laneIndex: 2, z: -70 }
+    ];
+    const isSafe = om.validateObstaclePattern(denseFastPattern, 0, 54, 'FAST');
+    assert.equal(isSafe, false, 'Dense obstacle pattern exceeding reflex physics at 54 m/s must be rejected');
+  });
+
+  test('Validation 6: Accepts valid patterns requiring jump or slide when a genuine route exists', () => {
+    const om = new ObstacleManager(null);
+    om.reset();
+
+    // Valid jump pattern: crate in lane 0, low hurdle in lane 1, lane 2 open
+    const validJumpPattern = [
+      { type: OBSTACLE_TYPES.LANE_BLOCKER, laneIndex: 0, z: -60 },
+      { type: OBSTACLE_TYPES.LOW_BARRIER, laneIndex: 1, z: -60 }
+    ];
+    assert.equal(om.validateObstaclePattern(validJumpPattern, 0, 22, 'MEDIUM'), true, 'Valid jump pattern with safe lane must pass');
+
+    // Valid slide pattern: high barrier in lane 1, crate in lane 2, lane 0 open
+    const validSlidePattern = [
+      { type: OBSTACLE_TYPES.HIGH_BARRIER, laneIndex: 1, z: -60 },
+      { type: OBSTACLE_TYPES.LANE_BLOCKER, laneIndex: 2, z: -60 }
+    ];
+    assert.equal(om.validateObstaclePattern(validSlidePattern, 0, 22, 'MEDIUM'), true, 'Valid slide pattern with safe lane must pass');
+  });
+
+  test('Validation 7: Repeated procedural obstacle generation across Easy, Medium, and Fast modes guarantees zero unavoidable 3-lane blocks', () => {
+    class MockDifficultyManager {
+      constructor(mode) {
+        this.mode = mode;
+      }
+      getMode() { return this.mode; }
+      getConfig() { return DIFFICULTY_CONFIG[this.mode]; }
+    }
+
+    for (const mode of [DIFFICULTY_MODES.EASY, DIFFICULTY_MODES.MEDIUM, DIFFICULTY_MODES.FAST]) {
+      const dm = new MockDifficultyManager(mode);
+      const cfg = dm.getConfig();
+
+      for (let run = 0; run < 5; run++) {
+        const om = new ObstacleManager(null);
+        om.setDifficultyManager(dm);
+        om.reset();
+
+        let playerZ = 0;
+        const dt = 0.016;
+        const speed = cfg.INITIAL_SPEED;
+        let distance = 0;
+
+        // Simulate 40 seconds of gameplay (600m - 1200m)
+        for (let frame = 0; frame < 800; frame++) {
+          playerZ -= speed * dt;
+          distance += speed * dt;
+          om.update(playerZ, dt, distance, speed);
+
+          // Check active obstacles at this instant
+          const activeObs = om.getActiveObstacles();
+          for (const obs of activeObs) {
+            const range = om.getObstaclePlayerZRange(obs, playerZ, speed);
+            if (!range) continue;
+
+            const window = Math.max(4.0, speed * 0.25);
+            const blockedLanes = [false, false, false];
+
+            for (const other of activeObs) {
+              const rOther = om.getObstaclePlayerZRange(other, playerZ, speed);
+              if (!rOther) continue;
+              if (Math.abs(rOther.zCenter - range.zCenter) <= window || (range.zMin <= rOther.zMax && range.zMax >= rOther.zMin)) {
+                blockedLanes[rOther.laneIndex] = true;
+              }
+            }
+
+            assert.ok(
+              !(blockedLanes[0] && blockedLanes[1] && blockedLanes[2]),
+              `Mode ${mode} run ${run} produced an unavoidable 3-lane block at z = ${range.zCenter.toFixed(1)}`
+            );
+          }
+        }
+      }
     }
   });
 });

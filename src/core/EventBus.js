@@ -84,5 +84,8 @@ export const EVENTS = {
 
   // Audio & Settings
   SOUND_PLAY_SFX: 'SOUND_PLAY_SFX',
-  SETTINGS_CHANGED: 'SETTINGS_CHANGED'
+  SETTINGS_CHANGED: 'SETTINGS_CHANGED',
+
+  // Authentication & Cloud Sync
+  AUTH_STATE_CHANGED: 'AUTH_STATE_CHANGED'
 };

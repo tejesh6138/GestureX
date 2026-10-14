@@ -1,12 +1,13 @@
 /**
  * AI Gesture Runner 3D - ResultsScreen
- * Player career statistics, achievement trophies, and coin-aware leaderboard interface.
- * Normalized for future Django REST Framework + PostgreSQL cloud integration.
+ * Player career statistics, achievement trophies, and real-time cloud-connected leaderboard.
+ * Integrates live Django REST Framework + Neon PostgreSQL APIs with graceful local fallback.
  */
 
 import { Score } from '../services/ScoreService.js';
 import { Achievements } from '../services/AchievementService.js';
 import { ApiClient } from '../services/ApiClient.js';
+import { AuthService } from '../services/AuthService.js';
 import { Sound } from '../services/SoundService.js';
 import { MathUtils } from '../utils/MathUtils.js';
 
@@ -44,6 +45,10 @@ export class ResultsScreen {
               <span id="ov-high-score" class="ov-val highlight">0</span>
             </div>
             <div class="overview-box">
+              <span class="ov-label">GLOBAL RANK</span>
+              <span id="ov-global-rank" class="ov-val highlight">Unranked</span>
+            </div>
+            <div class="overview-box">
               <span class="ov-label">BEST DISTANCE</span>
               <span id="ov-best-distance" class="ov-val">0 m</span>
             </div>
@@ -61,10 +66,13 @@ export class ResultsScreen {
                 <span id="ov-total-coins">0</span>
               </span>
             </div>
-            <div class="overview-box full-width">
+            <div class="overview-box">
               <span class="ov-label">COMPLETED RUNS</span>
               <span id="ov-games-played" class="ov-val">0</span>
             </div>
+          </div>
+          <div id="stats-auth-notice" class="field-hint" style="text-align: center; margin-top: 14px;">
+            <!-- Injected dynamically -->
           </div>
         </div>
 
@@ -73,7 +81,7 @@ export class ResultsScreen {
           <!-- Sub-toggle: Local vs Global -->
           <div class="leaderboard-subnav">
             <button id="sub-btn-local" class="sub-tab-btn active">🏅 Local Records</button>
-            <button id="sub-btn-global" class="sub-tab-btn">🌐 Cloud Leaderboard</button>
+            <button id="sub-btn-global" class="sub-tab-btn">🌐 Neon Cloud Leaderboard</button>
           </div>
 
           <div class="leaderboard-meta-bar">
@@ -103,17 +111,26 @@ export class ResultsScreen {
           </div>
 
           <!-- Global Cloud Leaderboard View -->
-          <div id="leaderboard-global-view" class="leaderboard-global-view hidden">
-            <div class="leaderboard-status-card">
-              <div class="status-icon">🔌</div>
-              <h3 id="cloud-status-title">STANDALONE CLIENT MODE</h3>
-              <p id="leaderboard-msg">
-                Global cloud leaderboards require a connected Django REST Framework + PostgreSQL backend server.
-                Personal scores and coin records are actively tracked in local browser persistence.
-              </p>
-              <div class="backend-notice-pill">
-                API Endpoint: <code>/api/v1/scores/leaderboard/</code> (Offline)
-              </div>
+          <div id="leaderboard-global-view" class="leaderboard-table-container hidden">
+            <div id="global-loading-indicator" class="leaderboard-empty">
+              ⚡ Loading live rankings from Neon PostgreSQL Cloud...
+            </div>
+            <table id="global-leaderboard-table" class="leaderboard-table hidden">
+              <thead>
+                <tr>
+                  <th>RANK</th>
+                  <th>RUNNER</th>
+                  <th>SCORE</th>
+                  <th>COINS</th>
+                  <th>DIFFICULTY</th>
+                </tr>
+              </thead>
+              <tbody id="leaderboard-global-body">
+                <!-- Dynamically populated from API -->
+              </tbody>
+            </table>
+            <div id="global-leaderboard-empty" class="leaderboard-empty hidden">
+              No global runs saved to Neon Cloud yet. Be the first to claim Rank #1!
             </div>
           </div>
         </div>
@@ -182,7 +199,7 @@ export class ResultsScreen {
       subLocal.classList.remove('active');
       viewGlobal.classList.remove('hidden');
       viewLocal.classList.add('hidden');
-      storageTag.textContent = 'CLOUD API';
+      storageTag.textContent = 'NEON POSTGRESQL CLOUD';
       this.renderGlobalLeaderboard();
     };
 
@@ -214,7 +231,6 @@ export class ResultsScreen {
       if (rec.rank === 1) tr.className = 'top-rank';
 
       const rankBadge = rec.rank === 1 ? '🥇 1' : rec.rank === 2 ? '🥈 2' : rec.rank === 3 ? '🥉 3' : `#${rec.rank}`;
-
       const diffBadge = rec.difficulty ? `<span class="diff-badge-mini ${rec.difficulty.toLowerCase()}">${rec.difficulty}</span> ` : '';
 
       tr.innerHTML = `
@@ -228,32 +244,110 @@ export class ResultsScreen {
     });
   }
 
-  renderGlobalLeaderboard() {
-    const msg = this.element.querySelector('#leaderboard-msg');
-    const title = this.element.querySelector('#cloud-status-title');
+  async renderGlobalLeaderboard() {
+    const loader = this.element.querySelector('#global-loading-indicator');
+    const table = this.element.querySelector('#global-leaderboard-table');
+    const tbody = this.element.querySelector('#leaderboard-global-body');
+    const emptyMsg = this.element.querySelector('#global-leaderboard-empty');
 
-    ApiClient.fetchLeaderboard().then((res) => {
-      if (!res.available) {
-        title.textContent = 'STANDALONE CLIENT MODE';
-        msg.textContent = 'Global cloud leaderboards require a connected Django REST Framework + PostgreSQL server. Personal statistics are preserved in local storage.';
-      } else {
-        title.textContent = 'CLOUD LEADERBOARD CONNECTED';
-        msg.textContent = res.message;
+    loader.classList.remove('hidden');
+    loader.textContent = '⚡ Loading live rankings from Neon PostgreSQL Cloud...';
+    table.classList.add('hidden');
+    emptyMsg.classList.add('hidden');
+    tbody.innerHTML = '';
+
+    try {
+      const res = await ApiClient.fetchLeaderboard(50, 'runs');
+
+      loader.classList.add('hidden');
+
+      if (!res.ok) {
+        loader.textContent = res.offline
+          ? '⚠️ Backend offline. Connect backend to view Neon Cloud rankings.'
+          : '⚠️ Could not load global rankings.';
+        loader.classList.remove('hidden');
+        return;
       }
-    });
+
+      const entries = res.data?.leaderboard || [];
+      if (entries.length === 0) {
+        emptyMsg.classList.remove('hidden');
+        return;
+      }
+
+      table.classList.remove('hidden');
+      const currentUser = AuthService.getUser();
+
+      entries.forEach((entry) => {
+        const tr = document.createElement('tr');
+        const isCurrentPlayer = currentUser && currentUser.username === entry.username;
+        if (isCurrentPlayer) {
+          tr.className = 'top-rank current-user-row';
+        } else if (entry.rank === 1) {
+          tr.className = 'top-rank';
+        }
+
+        const rankBadge = entry.rank === 1 ? '🥇 1' : entry.rank === 2 ? '🥈 2' : entry.rank === 3 ? '🥉 3' : `#${entry.rank}`;
+        const diffBadge = entry.difficulty ? `<span class="diff-badge-mini ${entry.difficulty.toLowerCase()}">${entry.difficulty}</span> ` : '';
+
+        tr.innerHTML = `
+          <td class="col-rank">${rankBadge}</td>
+          <td class="col-name">${diffBadge}${entry.display_name}${isCurrentPlayer ? ' (You)' : ''}</td>
+          <td class="col-score highlight">${MathUtils.formatNumber(entry.score)}</td>
+          <td class="col-coins"><span class="coin-mini">🪙</span> ${MathUtils.formatNumber(entry.coins)}</td>
+          <td class="col-diff">${entry.difficulty}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    } catch {
+      loader.textContent = '⚠️ Network error communicating with Neon Cloud.';
+      loader.classList.remove('hidden');
+    }
   }
 
   renderLeaderboards() {
     this.renderLocalLeaderboard();
   }
 
-  refresh() {
+  async refresh() {
     const pb = Score.getPersonalBest();
-    this.element.querySelector('#ov-high-score').textContent = MathUtils.formatNumber(pb.score);
-    this.element.querySelector('#ov-best-distance').textContent = MathUtils.formatDistance(pb.distanceTravelled);
-    this.element.querySelector('#ov-highest-run-coins').textContent = MathUtils.formatNumber(Score.getHighestRunCoins());
-    this.element.querySelector('#ov-total-coins').textContent = MathUtils.formatNumber(Score.getTotalCoins());
-    this.element.querySelector('#ov-games-played').textContent = MathUtils.formatNumber(Score.getGamesPlayed());
+    const ovScore = this.element.querySelector('#ov-high-score');
+    const ovDist = this.element.querySelector('#ov-best-distance');
+    const ovHighestCoins = this.element.querySelector('#ov-highest-run-coins');
+    const ovTotalCoins = this.element.querySelector('#ov-total-coins');
+    const ovGames = this.element.querySelector('#ov-games-played');
+    const ovRank = this.element.querySelector('#ov-global-rank');
+    const notice = this.element.querySelector('#stats-auth-notice');
+
+    // Default to local records
+    ovScore.textContent = MathUtils.formatNumber(pb.score);
+    ovDist.textContent = MathUtils.formatDistance(pb.distanceTravelled);
+    ovHighestCoins.textContent = MathUtils.formatNumber(Score.getHighestRunCoins());
+    ovTotalCoins.textContent = MathUtils.formatNumber(Score.getTotalCoins());
+    ovGames.textContent = MathUtils.formatNumber(Score.getGamesPlayed());
+    ovRank.textContent = 'Unranked (Guest)';
+
+    if (AuthService.isLoggedIn()) {
+      notice.innerHTML = '⚡ Synchronized with Neon Cloud Database';
+      notice.style.color = 'var(--success-green)';
+
+      // Pull server authoritative career stats
+      try {
+        const statsRes = await ApiClient.fetchCareerStats();
+        if (statsRes.ok && statsRes.data) {
+          const s = statsRes.data;
+          if (s.highest_score > 0) ovScore.textContent = MathUtils.formatNumber(s.highest_score);
+          if (s.best_distance > 0) ovDist.textContent = MathUtils.formatDistance(s.best_distance);
+          if (s.best_coins_single_run > 0) ovHighestCoins.textContent = MathUtils.formatNumber(s.best_coins_single_run);
+          if (s.total_coins > 0) ovTotalCoins.textContent = MathUtils.formatNumber(s.total_coins);
+          if (s.total_runs > 0) ovGames.textContent = MathUtils.formatNumber(s.total_runs);
+          ovRank.textContent = s.global_rank ? `#${s.global_rank}` : 'Unranked';
+        }
+      } catch {}
+    } else {
+      notice.innerHTML = '👤 Guest Mode: Running in local browser storage. Log in to claim your global rank.';
+      notice.style.color = 'var(--text-secondary)';
+    }
 
     // Populate Achievements
     const grid = this.element.querySelector('#achievements-grid');

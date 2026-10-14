@@ -1,6 +1,6 @@
 /**
  * AI Gesture Runner 3D - Environment Configuration
- * Modular architecture prepared for future REST API and cloud services.
+ * Production configuration for Django REST Framework + Neon PostgreSQL + SMTP Email OTP backend.
  */
 
 export const ENVIRONMENT = {
@@ -9,23 +9,45 @@ export const ENVIRONMENT = {
   ENV: import.meta.env?.MODE || 'development',
   DEBUG_MODE: false,
 
-  // Future backend API configuration (Disabled for initial frontend-only deployment)
+  // Backend REST API Configuration (Django REST Framework + Neon PostgreSQL)
   API: {
-    ENABLED: false,
-    BASE_URL: 'https://api.gesturerunner3d.example.com/v1',
-    TIMEOUT_MS: 5000,
+    ENABLED: true,
+    BASE_URL: import.meta.env?.VITE_API_BASE_URL || 'http://localhost:8000/api/v1',
+    TIMEOUT_MS: 10000,
     ENDPOINTS: {
-      LOGIN: '/auth/login',
-      REGISTER: '/auth/register',
-      SCORES: '/scores',
-      LEADERBOARD: '/scores/leaderboard',
-      ACHIEVEMENTS: '/achievements'
+      // Authentication & Verification
+      REGISTER: '/auth/register/',
+      VERIFY_EMAIL: '/auth/verify-email/',
+      RESEND_OTP: '/auth/resend-otp/',
+      LOGIN: '/auth/login/',
+      LOGOUT: '/auth/logout/',
+      TOKEN_REFRESH: '/auth/token/refresh/',
+      PASSWORD_RESET_REQUEST: '/auth/password-reset/request/',
+      PASSWORD_RESET_CONFIRM: '/auth/password-reset/confirm/',
+
+      // User Profile & Settings
+      CURRENT_USER: '/users/me/',
+      CHANGE_PASSWORD: '/users/me/change-password/',
+
+      // Authoritative Game Runs & Career Stats
+      GAME_RUNS: '/game-runs/',
+      GAME_STATS_ME: '/game-stats/me/',
+
+      // Leaderboard
+      LEADERBOARD: '/leaderboard/',
+      LEADERBOARD_ME: '/leaderboard/me/',
+
+      // Achievements & Gamification
+      ACHIEVEMENTS: '/achievements/',
+      ACHIEVEMENTS_ME: '/achievements/me/',
+
+      // System Health
+      HEALTH: '/health/'
     }
   },
 
   // MediaPipe AI settings
   AI: {
-    // Priority: local public folder first, fallback to Google CDN
     MODEL_PATH: './models/hand_landmarker.task',
     MODEL_FALLBACK_URL: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
     WASM_PATH: './wasm',

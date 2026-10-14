@@ -1,7 +1,7 @@
 /**
  * AI Gesture Runner 3D - MenuScreen
  * Cyberpunk animated landing menu with 3 Selectable Difficulty Modes (EASY, MEDIUM, FAST),
- * camera status indicator, and personal best summary.
+ * camera status indicator, personal best summary, and User Authentication pill.
  */
 
 import { Score } from '../services/ScoreService.js';
@@ -9,18 +9,23 @@ import { Camera } from '../gesture/CameraService.js';
 import { Sound } from '../services/SoundService.js';
 import { DIFFICULTY_MODES, DIFFICULTY_CONFIG } from '../core/GameConfig.js';
 import { Storage } from '../services/StorageService.js';
-import { GlobalEvents } from '../core/EventBus.js';
+import { GlobalEvents, EVENTS } from '../core/EventBus.js';
+import { AuthService } from '../services/AuthService.js';
+import { AuthModal } from './AuthModal.js';
+import { ApiClient } from '../services/ApiClient.js';
 
 export class MenuScreen {
   constructor(container, onAction) {
     this.container = container;
     this.onAction = onAction;
     this.element = null;
+    this.authModal = new AuthModal(container);
 
     const savedMode = Storage.getItem('GAME_DIFFICULTY', DIFFICULTY_MODES.MEDIUM);
     this.selectedDifficulty = DIFFICULTY_CONFIG[savedMode] ? savedMode : DIFFICULTY_MODES.MEDIUM;
 
     this.build();
+    this.setupAuthSync();
   }
 
   build() {
@@ -31,6 +36,12 @@ export class MenuScreen {
     const pb = Score.getPersonalBest();
 
     this.element.innerHTML = `
+      <!-- User Account / Login Pill Button -->
+      <button id="btn-account" class="menu-account-btn" title="Player Account">
+        <span class="account-dot-guest" id="account-status-dot"></span>
+        <span id="account-username-label">GUEST / LOGIN</span>
+      </button>
+
       <div class="menu-content glass-card">
         <div class="logo-wrapper">
           <div class="logo-sub">TOUCH-FREE COMPUTER VISION</div>
@@ -105,9 +116,53 @@ export class MenuScreen {
 
     this.container.appendChild(this.element);
     this.bindEvents();
+    this.updateAccountStatus();
+  }
+
+  setupAuthSync() {
+    GlobalEvents.on(EVENTS.AUTH_STATE_CHANGED, ({ isAuthenticated, user }) => {
+      this.updateAccountStatus();
+      if (isAuthenticated && user) {
+        // Fetch authoritative stats from Neon PostgreSQL in background
+        ApiClient.fetchCareerStats().then((res) => {
+          if (res.ok && res.data) {
+            const pbScore = this.element.querySelector('#menu-pb-score');
+            const pbCoins = this.element.querySelector('#menu-pb-coins');
+            if (pbScore && res.data.highest_score > 0) {
+              pbScore.textContent = `${res.data.highest_score.toLocaleString()} PTS`;
+            }
+            if (pbCoins && res.data.total_coins > 0) {
+              pbCoins.textContent = res.data.total_coins.toLocaleString();
+            }
+          }
+        }).catch(() => {});
+      }
+    });
+  }
+
+  updateAccountStatus() {
+    const dot = this.element.querySelector('#account-status-dot');
+    const label = this.element.querySelector('#account-username-label');
+    if (!dot || !label) return;
+
+    if (AuthService.isLoggedIn()) {
+      const user = AuthService.getUser();
+      const displayName = user?.profile?.display_name || user?.username || 'Runner';
+      dot.className = 'account-dot-logged';
+      label.textContent = `⚡ ${displayName}`;
+    } else {
+      dot.className = 'account-dot-guest';
+      label.textContent = '👤 GUEST / LOGIN';
+    }
   }
 
   bindEvents() {
+    // Account Modal trigger
+    this.element.querySelector('#btn-account').onclick = () => {
+      Sound.playClick();
+      this.authModal.show();
+    };
+
     // Difficulty card selection
     const cards = this.element.querySelectorAll('.diff-card');
     cards.forEach((card) => {
@@ -163,6 +218,8 @@ export class MenuScreen {
   }
 
   show() {
+    this.updateAccountStatus();
+
     // Refresh PB and camera pill
     const pb = Score.getPersonalBest();
     const pbScore = this.element.querySelector('#menu-pb-score');

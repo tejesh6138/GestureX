@@ -1,51 +1,140 @@
 /**
  * AI Gesture Runner 3D - AuthService
- * Authentication interface definition for future REST backend integration.
- * No mock credentials or fake logins are implemented in the initial frontend version.
+ * Complete authentication state management connecting UI to Django REST Framework APIs.
+ * Supports Guest Mode by default, email registration with OTP, username/password login,
+ * JWT lifecycle, profile synchronization, and password reset workflows.
  */
 
-import { ENVIRONMENT } from '../config/environment.js';
+import { ApiClient } from './ApiClient.js';
+import { Storage } from './StorageService.js';
+import { GlobalEvents, EVENTS } from '../core/EventBus.js';
 
 export class AuthServiceClass {
   constructor() {
-    this.currentUser = null;
-    this.isAuthenticated = false;
+    this.currentUser = Storage.getItem('CURRENT_USER_PROFILE', null);
+    this.isAuthenticated = ApiClient.isAuthenticated();
+    this.isGuest = !this.isAuthenticated;
+
+    // Asynchronously verify token and sync profile on startup
+    if (this.isAuthenticated) {
+      this.syncUserProfile().catch(() => {});
+    }
   }
 
-  isAuthEnabled() {
-    return ENVIRONMENT.API.ENABLED;
+  isLoggedIn() {
+    return this.isAuthenticated;
   }
 
-  getCurrentUser() {
+  isGuestMode() {
+    return !this.isAuthenticated;
+  }
+
+  getUser() {
     return this.currentUser ? { ...this.currentUser } : null;
   }
 
-  async login(username, password) {
-    if (!this.isAuthEnabled()) {
-      return {
-        success: false,
-        message: 'Account authentication is disabled in standalone frontend version.'
-      };
+  getDisplayName() {
+    if (!this.currentUser) return 'Guest Runner';
+    return this.currentUser.profile?.display_name || this.currentUser.username;
+  }
+
+  async syncUserProfile() {
+    if (!ApiClient.isAuthenticated()) return null;
+    const res = await ApiClient.getCurrentUser();
+    if (res.ok && res.data) {
+      this.currentUser = res.data;
+      this.isAuthenticated = true;
+      this.isGuest = false;
+      Storage.setItem('CURRENT_USER_PROFILE', this.currentUser);
+      GlobalEvents.emit(EVENTS.AUTH_STATE_CHANGED, {
+        isAuthenticated: true,
+        user: this.currentUser
+      });
+      return this.currentUser;
+    } else if (res.status === 401) {
+      this.logout();
     }
-    // Interface ready for future REST API implementation
-    return { success: false, message: 'Backend integration required.' };
+    return null;
   }
 
   async register(username, email, password) {
-    if (!this.isAuthEnabled()) {
-      return {
-        success: false,
-        message: 'Account registration is disabled in standalone frontend version.'
-      };
+    const res = await ApiClient.register(username, email, password);
+    return res;
+  }
+
+  async verifyEmail(email, otp) {
+    const res = await ApiClient.verifyEmail(email, otp);
+    if (res.ok && res.data.user) {
+      this.currentUser = res.data.user;
+      this.isAuthenticated = true;
+      this.isGuest = false;
+      Storage.setItem('CURRENT_USER_PROFILE', this.currentUser);
+      GlobalEvents.emit(EVENTS.AUTH_STATE_CHANGED, {
+        isAuthenticated: true,
+        user: this.currentUser
+      });
     }
-    // Interface ready for future REST API implementation
-    return { success: false, message: 'Backend integration required.' };
+    return res;
+  }
+
+  async resendOTP(email) {
+    return ApiClient.resendOTP(email);
+  }
+
+  async login(username, password) {
+    const res = await ApiClient.login(username, password);
+    if (res.ok && res.data.user) {
+      this.currentUser = res.data.user;
+      this.isAuthenticated = true;
+      this.isGuest = false;
+      Storage.setItem('CURRENT_USER_PROFILE', this.currentUser);
+      GlobalEvents.emit(EVENTS.AUTH_STATE_CHANGED, {
+        isAuthenticated: true,
+        user: this.currentUser
+      });
+
+      // Synchronize any queued offline scores
+      ApiClient.flushPendingRuns().catch(() => {});
+    }
+    return res;
   }
 
   async logout() {
+    await ApiClient.logout();
     this.currentUser = null;
     this.isAuthenticated = false;
-    return { success: true };
+    this.isGuest = true;
+    Storage.removeItem('CURRENT_USER_PROFILE');
+    GlobalEvents.emit(EVENTS.AUTH_STATE_CHANGED, {
+      isAuthenticated: false,
+      user: null
+    });
+    return { ok: true };
+  }
+
+  async updateProfile(profileData) {
+    const res = await ApiClient.updateProfile(profileData);
+    if (res.ok && res.data) {
+      this.currentUser = res.data;
+      Storage.setItem('CURRENT_USER_PROFILE', this.currentUser);
+      GlobalEvents.emit(EVENTS.AUTH_STATE_CHANGED, {
+        isAuthenticated: true,
+        user: this.currentUser
+      });
+    }
+    return res;
+  }
+
+  async changePassword(oldPassword, newPassword) {
+    return ApiClient.changePassword(oldPassword, newPassword);
+  }
+
+  async requestPasswordReset(email) {
+    return ApiClient.requestPasswordReset(email);
+  }
+
+  async confirmPasswordReset(email, otp, newPassword) {
+    return ApiClient.confirmPasswordReset(email, otp, newPassword);
   }
 }
 
