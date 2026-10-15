@@ -258,7 +258,7 @@ export class ResultsScreen {
     tbody.innerHTML = '';
 
     try {
-      const res = await ApiClient.fetchLeaderboard(50, 'runs');
+      const res = await ApiClient.fetchLeaderboard(50, 'players');
 
       loader.classList.add('hidden');
 

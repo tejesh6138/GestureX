@@ -96,7 +96,17 @@ class LoginView(APIView):
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            if 'email_unverified' in serializer.errors:
+                email_raw = serializer.errors.get('email', [''])[0] if isinstance(serializer.errors.get('email'), list) else serializer.errors.get('email', '')
+                detail_raw = serializer.errors.get('detail', [''])[0] if isinstance(serializer.errors.get('detail'), list) else serializer.errors.get('detail', '')
+                return Response({
+                    'detail': str(detail_raw),
+                    'email_unverified': True,
+                    'email': str(email_raw)
+                }, status=status.HTTP_400_BAD_REQUEST)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
         user = serializer.validated_data['user']
 
         tokens = get_tokens_for_user(user)

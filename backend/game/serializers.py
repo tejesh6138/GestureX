@@ -68,6 +68,7 @@ class LeaderboardEntrySerializer(serializers.Serializer):
     display_name = serializers.CharField()
     score = serializers.IntegerField()
     coins = serializers.IntegerField()
+    distance = serializers.FloatField(required=False, default=0.0)
     difficulty = serializers.CharField()
     created_at = serializers.DateTimeField()
 

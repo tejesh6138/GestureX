@@ -143,3 +143,197 @@ class GameBackendTests(TestCase):
         res = self.client.get('/api/v1/achievements/')
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertGreaterEqual(res.data['total_achievements'], 5)
+
+    def test_leaderboard_deduplicates_multiple_runs_per_player(self):
+        """
+        Multiple runs by one player must produce exactly one leaderboard entry.
+        Score, coins, distance, and difficulty must all come from the same best run.
+        Historical runs must not be deleted.
+        """
+        # User 1 submits 3 runs: 120 pts, 850 pts (best), 420 pts
+        self.client.force_authenticate(user=self.user1)
+        self.client.post('/api/v1/game-runs/', {
+            'run_id': str(uuid.uuid4()),
+            'score': 120,
+            'coins': 15,
+            'distance': 100.0,
+            'difficulty': 'EASY',
+            'duration_seconds': 20.0,
+        })
+        self.client.post('/api/v1/game-runs/', {
+            'run_id': str(uuid.uuid4()),
+            'score': 850,
+            'coins': 98,
+            'distance': 520.0,
+            'difficulty': 'FAST',
+            'duration_seconds': 60.0,
+        })
+        self.client.post('/api/v1/game-runs/', {
+            'run_id': str(uuid.uuid4()),
+            'score': 420,
+            'coins': 40,
+            'distance': 250.0,
+            'difficulty': 'MEDIUM',
+            'duration_seconds': 35.0,
+        })
+
+        # User 2 submits 2 runs: 50 pts, 300 pts
+        self.client.force_authenticate(user=self.user2)
+        self.client.post('/api/v1/game-runs/', {
+            'run_id': str(uuid.uuid4()),
+            'score': 50,
+            'coins': 5,
+            'distance': 40.0,
+            'difficulty': 'EASY',
+            'duration_seconds': 10.0,
+        })
+        self.client.post('/api/v1/game-runs/', {
+            'run_id': str(uuid.uuid4()),
+            'score': 300,
+            'coins': 35,
+            'distance': 200.0,
+            'difficulty': 'MEDIUM',
+            'duration_seconds': 30.0,
+        })
+
+        # Check leaderboard: Total entries must be exactly 2 (one per player)
+        lb_res = self.client.get('/api/v1/leaderboard/')
+        self.assertEqual(lb_res.status_code, status.HTTP_200_OK)
+        entries = lb_res.data['leaderboard']
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(lb_res.data['total_entries'], 2)
+
+        # 1st entry: user1 with best run
+        self.assertEqual(entries[0]['username'], 'runner_alpha')
+        self.assertEqual(entries[0]['score'], 850)
+        self.assertEqual(entries[0]['coins'], 98)
+        self.assertEqual(entries[0]['distance'], 520.0)
+        self.assertEqual(entries[0]['difficulty'], 'FAST')
+        self.assertEqual(entries[0]['rank'], 1)
+
+        # 2nd entry: user2 with best run
+        self.assertEqual(entries[1]['username'], 'runner_beta')
+        self.assertEqual(entries[1]['score'], 300)
+        self.assertEqual(entries[1]['coins'], 35)
+        self.assertEqual(entries[1]['distance'], 200.0)
+        self.assertEqual(entries[1]['difficulty'], 'MEDIUM')
+        self.assertEqual(entries[1]['rank'], 2)
+
+        # Historical runs must all still exist in the database (5 total runs)
+        self.assertEqual(GameRun.objects.filter(user=self.user1).count(), 3)
+        self.assertEqual(GameRun.objects.filter(user=self.user2).count(), 2)
+        self.assertEqual(GameRun.objects.count(), 5)
+
+    def test_personal_best_endpoint_user_isolation(self):
+        """
+        UserStatsView (/api/v1/game-stats/me/) and UserLeaderboardRankView (/api/v1/leaderboard/me/)
+        must strictly return the authenticated player's own best run metrics and never leak another player's data.
+        """
+        # User 1 has runs: 120, 850, 420
+        self.client.force_authenticate(user=self.user1)
+        self.client.post('/api/v1/game-runs/', {
+            'run_id': str(uuid.uuid4()),
+            'score': 120,
+            'coins': 15,
+            'distance': 100.0,
+            'duration_seconds': 20.0,
+        })
+        self.client.post('/api/v1/game-runs/', {
+            'run_id': str(uuid.uuid4()),
+            'score': 850,
+            'coins': 98,
+            'distance': 520.0,
+            'difficulty': 'FAST',
+            'duration_seconds': 60.0,
+        })
+        self.client.post('/api/v1/game-runs/', {
+            'run_id': str(uuid.uuid4()),
+            'score': 420,
+            'coins': 40,
+            'distance': 250.0,
+            'duration_seconds': 35.0,
+        })
+
+        # User 1 stats check
+        stats_res1 = self.client.get('/api/v1/game-stats/me/')
+        self.assertEqual(stats_res1.status_code, status.HTTP_200_OK)
+        self.assertEqual(stats_res1.data['highest_score'], 850)
+        self.assertEqual(stats_res1.data['best_distance'], 520.0)
+        self.assertEqual(stats_res1.data['best_run_coins'], 98)
+        self.assertEqual(stats_res1.data['best_run_difficulty'], 'FAST')
+        self.assertEqual(stats_res1.data['total_coins'], 15 + 98 + 40)
+        self.assertEqual(stats_res1.data['global_rank'], 1)
+
+        # User 2 has NO completed runs
+        self.client.force_authenticate(user=self.user2)
+        stats_res2 = self.client.get('/api/v1/game-stats/me/')
+        self.assertEqual(stats_res2.status_code, status.HTTP_200_OK)
+        self.assertEqual(stats_res2.data['highest_score'], 0)
+        self.assertEqual(stats_res2.data['best_distance'], 0.0)
+        self.assertEqual(stats_res2.data['best_run_coins'], 0)
+        self.assertIsNone(stats_res2.data['global_rank'])
+
+        # User 2 leaderboard/me check
+        rank_res2 = self.client.get('/api/v1/leaderboard/me/')
+        self.assertEqual(rank_res2.status_code, status.HTTP_200_OK)
+        self.assertEqual(rank_res2.data['highest_score'], 0)
+        self.assertIsNone(rank_res2.data['global_rank'])
+
+    def test_leaderboard_pagination_and_tie_breaking(self):
+        """
+        Pagination must preserve unique players across pages.
+        Tie breaking: score DESC, created_at ASC, username ASC.
+        """
+        # User 3
+        user3 = User.objects.create_user(
+            username='runner_gamma',
+            email='gamma@gesturex.test',
+            password='TestPassword123!',
+            is_email_verified=True,
+            is_active=True
+        )
+
+        # Alpha scores 1000 first
+        self.client.force_authenticate(user=self.user1)
+        self.client.post('/api/v1/game-runs/', {
+            'run_id': str(uuid.uuid4()),
+            'score': 1000,
+            'coins': 30,
+            'duration_seconds': 50.0,
+        })
+
+        # Beta scores 1000 second (tied score)
+        self.client.force_authenticate(user=self.user2)
+        self.client.post('/api/v1/game-runs/', {
+            'run_id': str(uuid.uuid4()),
+            'score': 1000,
+            'coins': 40,
+            'duration_seconds': 50.0,
+        })
+
+        # Gamma scores 500
+        self.client.force_authenticate(user=user3)
+        self.client.post('/api/v1/game-runs/', {
+            'run_id': str(uuid.uuid4()),
+            'score': 500,
+            'coins': 20,
+            'duration_seconds': 30.0,
+        })
+
+        # Page 1: limit=2, offset=0 -> runner_alpha (earlier 1000), runner_beta (later 1000)
+        p1_res = self.client.get('/api/v1/leaderboard/?limit=2&offset=0')
+        self.assertEqual(p1_res.status_code, status.HTTP_200_OK)
+        p1_entries = p1_res.data['leaderboard']
+        self.assertEqual(len(p1_entries), 2)
+        self.assertEqual(p1_entries[0]['username'], 'runner_alpha')
+        self.assertEqual(p1_entries[0]['rank'], 1)
+        self.assertEqual(p1_entries[1]['username'], 'runner_beta')
+        self.assertEqual(p1_entries[1]['rank'], 2)
+
+        # Page 2: limit=2, offset=2 -> runner_gamma
+        p2_res = self.client.get('/api/v1/leaderboard/?limit=2&offset=2')
+        self.assertEqual(p2_res.status_code, status.HTTP_200_OK)
+        p2_entries = p2_res.data['leaderboard']
+        self.assertEqual(len(p2_entries), 1)
+        self.assertEqual(p2_entries[0]['username'], 'runner_gamma')
+        self.assertEqual(p2_entries[0]['rank'], 3)

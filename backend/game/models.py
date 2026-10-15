@@ -12,6 +12,7 @@ class GameRun(models.Model):
     DIFFICULTY_CHOICES = [
         ('EASY', 'Easy'),
         ('MEDIUM', 'Medium'),
+        ('FAST', 'Fast'),
         ('HARD', 'Hard'),
         ('EXPERT', 'Expert'),
     ]

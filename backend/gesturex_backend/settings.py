@@ -31,7 +31,7 @@ ALLOWED_HOSTS = [
     host.strip()
     for host in os.getenv(
         'DJANGO_ALLOWED_HOSTS',
-        'localhost,127.0.0.1,0.0.0.0,*.onrender.com'
+        'localhost,127.0.0.1,0.0.0.0,testserver,*.onrender.com'
     ).split(',')
     if host.strip()
 ]
@@ -222,12 +222,12 @@ EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '').strip()
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '').replace(' ', '').strip()
 
 if EMAIL_HOST_USER and EMAIL_HOST_PASSWORD and not (os.getenv('USE_CONSOLE_EMAIL', 'False').lower() in ('true', '1')):
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    EMAIL_BACKEND = 'accounts.email_backend.GestureXEmailBackend'
     EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
     EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
     EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() in ('true', '1', 'yes')
     EMAIL_USE_SSL = os.getenv('EMAIL_USE_SSL', 'False').lower() in ('true', '1', 'yes')
-    EMAIL_TIMEOUT = 10
+    EMAIL_TIMEOUT = int(os.getenv('EMAIL_TIMEOUT', 10))
 else:
     # Safe console backend for development or unit testing without SMTP credentials
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'

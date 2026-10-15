@@ -51,9 +51,9 @@ export class MenuScreen {
 
         <div class="pb-badge">
           <span class="pb-label">🏆 PERSONAL BEST</span>
-          <span id="menu-pb-score" class="pb-score">${pb.score.toLocaleString()} PTS</span>
-          <span class="pb-distance">${pb.distanceTravelled} m</span>
-          <span class="pb-coins">🪙 <span id="menu-pb-coins">${Score.getTotalCoins().toLocaleString()}</span></span>
+          <span id="menu-pb-score" class="pb-score">${(pb.score || 0).toLocaleString()} PTS</span>
+          <span id="menu-pb-distance" class="pb-distance">${pb.distanceTravelled || 0} m</span>
+          <span class="pb-coins">🪙 <span id="menu-pb-coins">${(pb.coinsCollected || 0).toLocaleString()}</span></span>
         </div>
 
         <!-- 3 Selectable Game Difficulty Modes -->
@@ -122,26 +122,26 @@ export class MenuScreen {
   setupAuthSync() {
     GlobalEvents.on(EVENTS.AUTH_STATE_CHANGED, ({ isAuthenticated, user }) => {
       this.updateAccountStatus();
-      if (isAuthenticated && user) {
-        // Fetch authoritative stats from Neon PostgreSQL in background
-        ApiClient.fetchCareerStats().then((res) => {
-          if (res.ok && res.data) {
-            const pbScore = this.element.querySelector('#menu-pb-score');
-            const pbCoins = this.element.querySelector('#menu-pb-coins');
-            if (pbScore && res.data.highest_score > 0) {
-              pbScore.textContent = `${res.data.highest_score.toLocaleString()} PTS`;
-            }
-            if (pbCoins && res.data.total_coins > 0) {
-              pbCoins.textContent = res.data.total_coins.toLocaleString();
-            }
-          }
-        }).catch(() => {});
-      }
+      this.renderPersonalBest();
+    });
+
+    GlobalEvents.on('PERSONAL_BEST_UPDATED', (pb) => {
+      this.renderPersonalBest(pb);
     });
 
     GlobalEvents.on('OPEN_AUTH_MODAL', ({ view } = {}) => {
       this.authModal.show(view || 'LOGIN');
     });
+  }
+
+  renderPersonalBest(pb) {
+    if (!pb) pb = Score.getPersonalBest();
+    const pbScore = this.element.querySelector('#menu-pb-score');
+    const pbDistance = this.element.querySelector('#menu-pb-distance');
+    const pbCoins = this.element.querySelector('#menu-pb-coins');
+    if (pbScore) pbScore.textContent = `${(pb.score || 0).toLocaleString()} PTS`;
+    if (pbDistance) pbDistance.textContent = `${Math.floor(pb.distanceTravelled || 0)} m`;
+    if (pbCoins) pbCoins.textContent = (pb.coinsCollected || 0).toLocaleString();
   }
 
   updateAccountStatus() {
@@ -223,13 +223,7 @@ export class MenuScreen {
 
   show() {
     this.updateAccountStatus();
-
-    // Refresh PB and camera pill
-    const pb = Score.getPersonalBest();
-    const pbScore = this.element.querySelector('#menu-pb-score');
-    const pbCoins = this.element.querySelector('#menu-pb-coins');
-    if (pbScore) pbScore.textContent = `${pb.score.toLocaleString()} PTS`;
-    if (pbCoins) pbCoins.textContent = Score.getTotalCoins().toLocaleString();
+    this.renderPersonalBest();
 
     const dot = this.element.querySelector('#menu-cam-pill .status-dot');
     const statusText = this.element.querySelector('#menu-cam-status');

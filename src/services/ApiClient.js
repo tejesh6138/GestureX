@@ -324,7 +324,7 @@ export class ApiClientClass {
 
   // --- Leaderboard & Stats Endpoints ---
 
-  async fetchLeaderboard(limit = 50, mode = 'runs') {
+  async fetchLeaderboard(limit = 50, mode = 'players') {
     const query = `?limit=${limit}&mode=${mode}`;
     return this.request(`${this.endpoints.LEADERBOARD}${query}`, { method: 'GET' }, false);
   }

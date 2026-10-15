@@ -9,6 +9,17 @@ import { GlobalEvents, EVENTS } from '../core/EventBus.js';
 import { Score } from '../services/ScoreService.js';
 import { Achievements } from '../services/AchievementService.js';
 
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export class ScoreManager {
   constructor() {
     this.score = 0;
@@ -101,6 +112,7 @@ export class ScoreManager {
 
     const durationSeconds = Math.max(1, (performance.now() - this.runStartTime) / 1000);
     const runResult = {
+      run_id: generateUUID(),
       score: Math.floor(this.score),
       coinsCollected: this.currentRunCoins,
       distanceTravelled: Math.floor(this.distance),

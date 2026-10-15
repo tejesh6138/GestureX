@@ -1,9 +1,12 @@
 import hashlib
 import logging
 import secrets
+import smtplib
+import socket
 from datetime import timedelta
 from django.conf import settings
 from django.core.mail import send_mail
+from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from .models import EmailVerificationOTP, User
@@ -146,15 +149,44 @@ def send_otp_email(email: str, code: str, purpose: str = EmailVerificationOTP.PU
             fail_silently=False,
         )
         return True
+    except smtplib.SMTPAuthenticationError as e:
+        logger.error(f"Failed to deliver OTP email to {email}: SMTP Authentication rejected (535 BadCredentials).")
+        raise ValidationError(
+            "Email delivery failed: SMTP authentication rejected. The mail server rejected the credentials (invalid or expired Gmail App Password). Please verify backend EMAIL_HOST_PASSWORD."
+        )
+    except smtplib.SMTPRecipientsRefused:
+        logger.warning(f"Failed to deliver OTP email: recipient {email} was refused by the mail server.")
+        raise ValidationError(
+            "Email delivery failed: The recipient email address was rejected by the mail provider. Please verify the email address."
+        )
+    except smtplib.SMTPSenderRefused:
+        logger.error(f"Failed to deliver OTP email to {email}: sender address refused.")
+        raise ValidationError(
+            "Email delivery failed: Sender address was rejected by the mail server. Please verify DEFAULT_FROM_EMAIL configuration."
+        )
+    except (smtplib.SMTPConnectError, socket.timeout, TimeoutError, ConnectionRefusedError, socket.gaierror) as e:
+        logger.error(f"Failed to deliver OTP email to {email}: connection failure ({type(e).__name__}).")
+        raise ValidationError(
+            "Email delivery failed: Unable to connect to SMTP provider. Connection timed out or server unreachable."
+        )
+    except smtplib.SMTPException as e:
+        logger.error(f"Failed to deliver OTP email to {email}: SMTPException ({type(e).__name__}).")
+        raise ValidationError(
+            f"Email delivery failed: SMTP service error ({type(e).__name__})."
+        )
     except Exception as e:
-        logger.error(f"Failed to deliver OTP email to {email}: {e}")
-        raise ValidationError(f"Email delivery failed: Unable to connect to SMTP provider. Please check email address.")
+        logger.error(f"Failed to deliver OTP email to {email}: Unexpected error ({type(e).__name__}).")
+        raise ValidationError(
+            "Email delivery failed: An unexpected error occurred while communicating with the mail server."
+        )
 
 
+@transaction.atomic
 def issue_otp(email: str, user: User = None, purpose: str = EmailVerificationOTP.PURPOSE_REGISTRATION) -> EmailVerificationOTP:
     """
     Generate, hash, and persist a new OTP record while invalidating existing active codes for the email.
     Enforces cooldown to mitigate email flood attacks.
+    Transactionally wrapped so failures during email delivery cleanly roll back OTP record creation.
     """
     # Enforce resend cooldown
     recent_otp = EmailVerificationOTP.objects.filter(
@@ -199,11 +231,13 @@ def issue_otp(email: str, user: User = None, purpose: str = EmailVerificationOTP
     return otp_record
 
 
+@transaction.atomic
 def verify_otp_code(email: str, code: str, purpose: str = EmailVerificationOTP.PURPOSE_REGISTRATION) -> EmailVerificationOTP:
     """
     Validate provided OTP code against stored hash, enforcing expiration and attempt thresholds.
+    Uses database row-locking (select_for_update) to prevent concurrent verification race conditions.
     """
-    otp_record = EmailVerificationOTP.objects.filter(
+    otp_record = EmailVerificationOTP.objects.select_for_update().filter(
         email=email,
         purpose=purpose,
         is_used=False

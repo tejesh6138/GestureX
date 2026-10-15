@@ -1,4 +1,5 @@
 from datetime import timedelta
+from django.db import transaction
 from django.utils import timezone
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
@@ -73,14 +74,15 @@ class RegisterSerializer(serializers.Serializer):
 
         return attrs
 
+    @transaction.atomic
     def create(self, validated_data):
         email = validated_data['email'].strip().lower()
         username = validated_data['username'].strip()
 
         # If an unverified user with this email or username already exists, update and re-use
-        existing_user = User.objects.filter(email__iexact=email, is_email_verified=False).first()
+        existing_user = User.objects.select_for_update().filter(email__iexact=email, is_email_verified=False).first()
         if not existing_user:
-            existing_user = User.objects.filter(username__iexact=username, is_email_verified=False).first()
+            existing_user = User.objects.select_for_update().filter(username__iexact=username, is_email_verified=False).first()
 
         if existing_user:
             existing_user.username = username
@@ -98,7 +100,7 @@ class RegisterSerializer(serializers.Serializer):
                 is_email_verified=False
             )
 
-        # Generate and dispatch initial OTP via SMTP
+        # Generate and dispatch initial OTP via SMTP (if this fails, transaction rolls back cleanly)
         issue_otp(email=email, user=user, purpose=EmailVerificationOTP.PURPOSE_REGISTRATION)
         return user
 
@@ -107,12 +109,13 @@ class VerifyEmailSerializer(serializers.Serializer):
     email = serializers.EmailField()
     otp = serializers.CharField(max_length=10)
 
+    @transaction.atomic
     def validate(self, attrs):
         email = attrs['email'].strip().lower()
         code = attrs['otp'].strip()
 
         try:
-            user = User.objects.get(email__iexact=email)
+            user = User.objects.select_for_update().get(email__iexact=email)
         except User.DoesNotExist:
             raise serializers.ValidationError({"email": "User account not found."})
 
@@ -156,19 +159,17 @@ class LoginSerializer(serializers.Serializer):
         if not user_candidate:
             raise serializers.ValidationError("Invalid credentials. Please check your username and password.")
 
-        # Authenticate using real username
-        user = authenticate(username=user_candidate.username, password=password)
-        if not user:
+        if not user_candidate.check_password(password):
             raise serializers.ValidationError("Invalid credentials. Please check your username and password.")
 
-        if not user.is_email_verified or not user.is_active:
+        if not user_candidate.is_email_verified or not user_candidate.is_active:
             raise serializers.ValidationError({
                 "detail": "Email address has not been verified. Please verify your email with the OTP sent to your inbox.",
                 "email_unverified": True,
-                "email": user.email
+                "email": user_candidate.email
             })
 
-        attrs['user'] = user
+        attrs['user'] = user_candidate
         return attrs
 
 
